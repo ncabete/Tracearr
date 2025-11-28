@@ -90,15 +90,28 @@ export const sessions = pgTable(
       .notNull()
       .$type<(typeof mediaTypeEnum)[number]>(),
     mediaTitle: text('media_title').notNull(),
+    // Enhanced media metadata for episodes
+    grandparentTitle: varchar('grandparent_title', { length: 500 }), // Show name (for episodes)
+    seasonNumber: integer('season_number'), // Season number (for episodes)
+    episodeNumber: integer('episode_number'), // Episode number (for episodes)
+    year: integer('year'), // Release year
+    thumbPath: varchar('thumb_path', { length: 500 }), // Poster path (e.g., /library/metadata/123/thumb)
+    ratingKey: varchar('rating_key', { length: 255 }), // Plex/Jellyfin media identifier
+    externalSessionId: varchar('external_session_id', { length: 255 }), // Tautulli reference_id for dedup
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     stoppedAt: timestamp('stopped_at', { withTimezone: true }),
-    durationMs: integer('duration_ms'),
+    durationMs: integer('duration_ms'), // Actual watch duration
+    totalDurationMs: integer('total_duration_ms'), // Total media length
+    progressMs: integer('progress_ms'), // Current playback position
     ipAddress: varchar('ip_address', { length: 45 }).notNull(),
     geoCity: varchar('geo_city', { length: 255 }),
     geoCountry: varchar('geo_country', { length: 100 }),
     geoLat: real('geo_lat'),
     geoLon: real('geo_lon'),
-    playerName: varchar('player_name', { length: 255 }),
+    playerName: varchar('player_name', { length: 255 }), // Player title/friendly name
+    deviceId: varchar('device_id', { length: 255 }), // Machine identifier (unique device UUID)
+    product: varchar('product', { length: 255 }), // Product name (e.g., "Plex for iOS")
+    device: varchar('device', { length: 255 }), // Device type (e.g., "iPhone", "Android TV")
     platform: varchar('platform', { length: 100 }),
     quality: varchar('quality', { length: 100 }),
     isTranscode: boolean('is_transcode').notNull().default(false),
@@ -108,6 +121,8 @@ export const sessions = pgTable(
     userTimeIdx: index('sessions_user_time_idx').on(table.userId, table.startedAt),
     serverTimeIdx: index('sessions_server_time_idx').on(table.serverId, table.startedAt),
     stateIdx: index('sessions_state_idx').on(table.state),
+    externalSessionIdx: index('sessions_external_session_idx').on(table.serverId, table.externalSessionId),
+    deviceIdx: index('sessions_device_idx').on(table.userId, table.deviceId),
   })
 );
 
@@ -168,6 +183,9 @@ export const settings = pgTable('settings', {
   notifyOnSessionStart: boolean('notify_on_session_start').notNull().default(false),
   notifyOnSessionStop: boolean('notify_on_session_stop').notNull().default(false),
   notifyOnServerDown: boolean('notify_on_server_down').notNull().default(true),
+  // Tautulli integration
+  tautulliUrl: text('tautulli_url'),
+  tautulliApiKey: text('tautulli_api_key'), // Encrypted
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

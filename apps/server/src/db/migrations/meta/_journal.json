@@ -15,6 +15,27 @@
       "when": 1764299825862,
       "tag": "0001_broken_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1764350531373,
+      "tag": "0002_public_sunfire",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1764352485915,
+      "tag": "0003_huge_enchantress",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1764353035598,
+      "tag": "0004_broken_ultimatum",
+      "breakpoints": true
     }
   ]
 }
