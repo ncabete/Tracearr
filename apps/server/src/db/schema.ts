@@ -183,6 +183,9 @@ export const settings = pgTable('settings', {
   notifyOnSessionStart: boolean('notify_on_session_start').notNull().default(false),
   notifyOnSessionStop: boolean('notify_on_session_stop').notNull().default(false),
   notifyOnServerDown: boolean('notify_on_server_down').notNull().default(true),
+  // Poller settings
+  pollerEnabled: boolean('poller_enabled').notNull().default(true),
+  pollerIntervalMs: integer('poller_interval_ms').notNull().default(15000),
   // Tautulli integration
   tautulliUrl: text('tautulli_url'),
   tautulliApiKey: text('tautulli_api_key'), // Encrypted

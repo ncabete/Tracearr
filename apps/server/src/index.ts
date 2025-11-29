@@ -40,6 +40,7 @@ import { violationRoutes } from './routes/violations.js';
 import { statsRoutes } from './routes/stats.js';
 import { settingsRoutes } from './routes/settings.js';
 import { importRoutes } from './routes/import.js';
+import { getPollerSettings } from './routes/settings.js';
 import { initializeEncryption, isEncryptionInitialized } from './utils/crypto.js';
 import { geoipService } from './services/geoip.js';
 import { createCacheService, createPubSubService } from './services/cache.js';
@@ -273,12 +274,12 @@ async function start() {
     process.on('SIGINT', cleanupWsSubscriber);
     process.on('SIGTERM', cleanupWsSubscriber);
 
-    // Start session poller after server is listening
-    const pollerEnabled = process.env.POLLER_ENABLED !== 'false';
-    const pollerInterval = parseInt(process.env.POLLER_INTERVAL ?? '15000', 10);
-
-    if (pollerEnabled) {
-      startPoller({ enabled: true, intervalMs: pollerInterval });
+    // Start session poller after server is listening (uses DB settings)
+    const pollerSettings = await getPollerSettings();
+    if (pollerSettings.enabled) {
+      startPoller({ enabled: true, intervalMs: pollerSettings.intervalMs });
+    } else {
+      app.log.info('Session poller disabled in settings');
     }
   } catch (err) {
     console.error('Failed to start server:', err);

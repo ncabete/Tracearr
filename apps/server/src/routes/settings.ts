@@ -62,6 +62,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         notifyOnSessionStart: row.notifyOnSessionStart,
         notifyOnSessionStop: row.notifyOnSessionStop,
         notifyOnServerDown: row.notifyOnServerDown,
+        pollerEnabled: row.pollerEnabled,
+        pollerIntervalMs: row.pollerIntervalMs,
         tautulliUrl: row.tautulliUrl,
         tautulliApiKey: row.tautulliApiKey ? '********' : null, // Mask API key
       };
@@ -98,6 +100,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         notifyOnSessionStart: boolean;
         notifyOnSessionStop: boolean;
         notifyOnServerDown: boolean;
+        pollerEnabled: boolean;
+        pollerIntervalMs: number;
         tautulliUrl: string | null;
         tautulliApiKey: string | null;
         updatedAt: Date;
@@ -131,6 +135,14 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
       if (body.data.notifyOnServerDown !== undefined) {
         updateData.notifyOnServerDown = body.data.notifyOnServerDown;
+      }
+
+      if (body.data.pollerEnabled !== undefined) {
+        updateData.pollerEnabled = body.data.pollerEnabled;
+      }
+
+      if (body.data.pollerIntervalMs !== undefined) {
+        updateData.pollerIntervalMs = body.data.pollerIntervalMs;
       }
 
       if (body.data.tautulliUrl !== undefined) {
@@ -189,6 +201,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         notifyOnSessionStart: row.notifyOnSessionStart,
         notifyOnSessionStop: row.notifyOnSessionStop,
         notifyOnServerDown: row.notifyOnServerDown,
+        pollerEnabled: row.pollerEnabled,
+        pollerIntervalMs: row.pollerIntervalMs,
         tautulliUrl: row.tautulliUrl,
         tautulliApiKey: row.tautulliApiKey ? '********' : null, // Mask API key
       };
@@ -197,3 +211,28 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }
   );
 };
+
+/**
+ * Get poller settings from database (for internal use by poller)
+ */
+export async function getPollerSettings(): Promise<{ enabled: boolean; intervalMs: number }> {
+  const row = await db
+    .select({
+      pollerEnabled: settings.pollerEnabled,
+      pollerIntervalMs: settings.pollerIntervalMs,
+    })
+    .from(settings)
+    .where(eq(settings.id, SETTINGS_ID))
+    .limit(1);
+
+  const settingsRow = row[0];
+  if (!settingsRow) {
+    // Return defaults if settings don't exist yet
+    return { enabled: true, intervalMs: 15000 };
+  }
+
+  return {
+    enabled: settingsRow.pollerEnabled,
+    intervalMs: settingsRow.pollerIntervalMs,
+  };
+}

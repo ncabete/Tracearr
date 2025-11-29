@@ -16,8 +16,6 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - POLLER_ENABLED=${POLLER_ENABLED:-true}
-      - POLLER_INTERVAL=${POLLER_INTERVAL:-15000}
     depends_on:
       timescale:
         condition: service_healthy

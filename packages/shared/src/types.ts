@@ -203,6 +203,9 @@ export interface Settings {
   notifyOnSessionStart: boolean;
   notifyOnSessionStop: boolean;
   notifyOnServerDown: boolean;
+  // Poller settings
+  pollerEnabled: boolean;
+  pollerIntervalMs: number;
   // Tautulli integration
   tautulliUrl: string | null;
   tautulliApiKey: string | null;

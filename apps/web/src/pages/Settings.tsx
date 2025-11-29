@@ -80,6 +80,15 @@ function GeneralSettings() {
   const { data: settings, isLoading } = useSettings();
   const updateSettings = useUpdateSettings();
 
+  const handleTogglePoller = (enabled: boolean) => {
+    updateSettings.mutate({ pollerEnabled: enabled });
+  };
+
+  const handleIntervalChange = (seconds: number) => {
+    const ms = Math.max(5, Math.min(300, seconds)) * 1000;
+    updateSettings.mutate({ pollerIntervalMs: ms });
+  };
+
   if (isLoading) {
     return (
       <Card>
@@ -95,6 +104,8 @@ function GeneralSettings() {
     );
   }
 
+  const intervalSeconds = Math.round((settings?.pollerIntervalMs ?? 15000) / 1000);
+
   return (
     <Card>
       <CardHeader>
@@ -104,18 +115,44 @@ function GeneralSettings() {
       <CardContent className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <Label className="text-base">Polling Interval</Label>
+            <Label className="text-base">Session Polling</Label>
             <p className="text-sm text-muted-foreground">
-              How often to check for active sessions (in seconds)
+              Enable automatic polling for active sessions from your media servers
             </p>
           </div>
-          <div className="w-24">
-            <Input type="number" defaultValue={15} disabled />
+          <Switch
+            checked={settings?.pollerEnabled ?? true}
+            onCheckedChange={handleTogglePoller}
+          />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-base">Polling Interval</Label>
+            <p className="text-sm text-muted-foreground">
+              How often to check for active sessions (5-300 seconds)
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={5}
+              max={300}
+              className="w-20"
+              defaultValue={intervalSeconds}
+              onBlur={(e) => handleIntervalChange(parseInt(e.target.value, 10) || 15)}
+              disabled={!settings?.pollerEnabled}
+            />
+            <span className="text-sm text-muted-foreground">sec</span>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Note: Some settings are configured via environment variables and cannot be changed here.
-        </p>
+
+        <div className="rounded-lg bg-muted/50 p-4">
+          <p className="text-sm text-muted-foreground">
+            Changes take effect on the next poll cycle. Lower intervals provide more real-time
+            updates but increase load on your media servers.
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

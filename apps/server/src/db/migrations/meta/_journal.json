@@ -36,6 +36,13 @@
       "when": 1764353035598,
       "tag": "0004_broken_ultimatum",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1764436503671,
+      "tag": "0005_nifty_kree",
+      "breakpoints": true
     }
   ]
 }

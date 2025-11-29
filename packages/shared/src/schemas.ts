@@ -143,6 +143,9 @@ export const updateSettingsSchema = z.object({
   notifyOnSessionStart: z.boolean().optional(),
   notifyOnSessionStop: z.boolean().optional(),
   notifyOnServerDown: z.boolean().optional(),
+  // Poller settings
+  pollerEnabled: z.boolean().optional(),
+  pollerIntervalMs: z.number().int().min(5000).max(300000).optional(),
   // Tautulli integration
   tautulliUrl: z.string().url().nullable().optional(),
   tautulliApiKey: z.string().nullable().optional(),
