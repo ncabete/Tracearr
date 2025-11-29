@@ -11,6 +11,8 @@ import type {
   PlayStats,
   UserStats,
   LocationStats,
+  UserLocation,
+  UserDevice,
   Settings,
   PaginatedResponse,
 } from '@tracearr/shared';
@@ -197,9 +199,11 @@ class ApiClient {
 
   // Users
   users = {
-    list: async () => {
-      const response = await this.request<{ data: User[] }>('/users');
-      return response.data;
+    list: (params?: { page?: number; pageSize?: number }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.page) searchParams.set('page', String(params.page));
+      if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+      return this.request<PaginatedResponse<User>>(`/users?${searchParams.toString()}`);
     },
     get: (id: string) => this.request<User>(`/users/${id}`),
     update: (id: string, data: Partial<User>) =>
@@ -207,6 +211,14 @@ class ApiClient {
     sessions: (id: string, params?: { page?: number; pageSize?: number }) => {
       const query = new URLSearchParams(params as Record<string, string>).toString();
       return this.request<PaginatedResponse<Session>>(`/users/${id}/sessions?${query}`);
+    },
+    locations: async (id: string) => {
+      const response = await this.request<{ data: UserLocation[] }>(`/users/${id}/locations`);
+      return response.data;
+    },
+    devices: async (id: string) => {
+      const response = await this.request<{ data: UserDevice[] }>(`/users/${id}/devices`);
+      return response.data;
     },
   };
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
@@ -75,17 +76,22 @@ const userColumns: ColumnDef<User>[] = [
 
 export function Users() {
   const navigate = useNavigate();
-  const { data: users, isLoading } = useUsers();
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  const { data, isLoading } = useUsers({ page, pageSize });
+
+  const users = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Users</h1>
-        {users && (
-          <p className="text-sm text-muted-foreground">
-            {users.length} user{users.length !== 1 ? 's' : ''} total
-          </p>
-        )}
+        <p className="text-sm text-muted-foreground">
+          {total} user{total !== 1 ? 's' : ''} total
+        </p>
       </div>
 
       <Card>
@@ -108,8 +114,12 @@ export function Users() {
           ) : (
             <DataTable
               columns={userColumns}
-              data={users ?? []}
-              pageSize={10}
+              data={users}
+              pageSize={pageSize}
+              pageCount={totalPages}
+              page={page}
+              onPageChange={setPage}
+              isLoading={isLoading}
               onRowClick={(user) => navigate(`/users/${user.id}`)}
               emptyMessage="No users found."
             />

@@ -15,6 +15,8 @@ export {
   useUser,
   useUserSessions,
   useUpdateUser,
+  useUserLocations,
+  useUserDevices,
 } from './useUsers';
 
 // Rule hooks

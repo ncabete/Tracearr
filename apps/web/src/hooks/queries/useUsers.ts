@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User, Session, PaginatedResponse } from '@tracearr/shared';
+import type { User, Session, UserLocation, UserDevice, PaginatedResponse } from '@tracearr/shared';
 import { api } from '@/lib/api';
 
-export function useUsers() {
+export function useUsers(params: { page?: number; pageSize?: number } = {}) {
   return useQuery({
-    queryKey: ['users', 'list'],
-    queryFn: api.users.list,
+    queryKey: ['users', 'list', params],
+    queryFn: () => api.users.list(params),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -40,5 +40,23 @@ export function useUpdateUser() {
       // Invalidate users list
       queryClient.invalidateQueries({ queryKey: ['users', 'list'] });
     },
+  });
+}
+
+export function useUserLocations(id: string) {
+  return useQuery({
+    queryKey: ['users', 'locations', id],
+    queryFn: () => api.users.locations(id),
+    enabled: !!id,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+export function useUserDevices(id: string) {
+  return useQuery({
+    queryKey: ['users', 'devices', id],
+    queryFn: () => api.users.devices(id),
+    enabled: !!id,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
