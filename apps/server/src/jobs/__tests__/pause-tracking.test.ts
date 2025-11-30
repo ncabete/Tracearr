@@ -2,12 +2,21 @@
  * Pause Tracking Tests
  *
  * Tests the pause accumulation, session grouping, watch completion,
- * and accurate duration calculation functionality.
+ * and accurate duration calculation functionality using the actual
+ * exported functions from poller.ts.
  */
 
 import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import type { Session, SessionState } from '@tracearr/shared';
+import type { Session } from '@tracearr/shared';
+
+// Import ACTUAL production functions - not local duplicates
+import {
+  calculatePauseAccumulation,
+  calculateStopDuration,
+  checkWatchCompletion,
+  shouldGroupWithPreviousSession,
+} from '../poller.js';
 
 /**
  * Create a mock session with pause tracking fields
@@ -55,86 +64,6 @@ function createTestSession(overrides: Partial<Session> = {}): Session {
     isTranscode: overrides.isTranscode ?? false,
     bitrate: overrides.bitrate ?? 10000,
   };
-}
-
-/**
- * Simulates the pause accumulation logic from poller.ts
- */
-function calculatePauseAccumulation(
-  previousState: SessionState,
-  newState: SessionState,
-  existingSession: { lastPausedAt: Date | null; pausedDurationMs: number },
-  now: Date
-): { lastPausedAt: Date | null; pausedDurationMs: number } {
-  let lastPausedAt = existingSession.lastPausedAt;
-  let pausedDurationMs = existingSession.pausedDurationMs;
-
-  if (previousState === 'playing' && newState === 'paused') {
-    // Started pausing - record timestamp
-    lastPausedAt = now;
-  } else if (previousState === 'paused' && newState === 'playing') {
-    // Resumed playing - accumulate pause duration
-    if (existingSession.lastPausedAt) {
-      const pausedMs = now.getTime() - existingSession.lastPausedAt.getTime();
-      pausedDurationMs = (existingSession.pausedDurationMs || 0) + pausedMs;
-    }
-    lastPausedAt = null;
-  }
-
-  return { lastPausedAt, pausedDurationMs };
-}
-
-/**
- * Simulates the stop duration calculation from poller.ts
- */
-function calculateStopDuration(
-  session: { startedAt: Date; lastPausedAt: Date | null; pausedDurationMs: number },
-  stoppedAt: Date
-): { durationMs: number; finalPausedDurationMs: number } {
-  const totalElapsedMs = stoppedAt.getTime() - session.startedAt.getTime();
-
-  // Calculate final paused duration - accumulate any remaining pause if stopped while paused
-  let finalPausedDurationMs = session.pausedDurationMs || 0;
-  if (session.lastPausedAt) {
-    // Session was stopped while paused - add the remaining pause time
-    finalPausedDurationMs += stoppedAt.getTime() - session.lastPausedAt.getTime();
-  }
-
-  // Calculate actual watch duration (excludes all paused time)
-  const durationMs = Math.max(0, totalElapsedMs - finalPausedDurationMs);
-
-  return { durationMs, finalPausedDurationMs };
-}
-
-/**
- * Simulates the watch completion check from poller.ts
- */
-function checkWatchCompletion(progressMs: number | null, totalDurationMs: number | null): boolean {
-  if (!progressMs || !totalDurationMs) return false;
-  const watchPercent = progressMs / totalDurationMs;
-  return watchPercent >= 0.8;
-}
-
-/**
- * Simulates the session grouping logic from poller.ts
- */
-function shouldGroupWithPreviousSession(
-  previousSession: { referenceId: string | null; id: string; progressMs: number | null; watched: boolean; stoppedAt: Date | null },
-  newProgressMs: number,
-  oneDayAgo: Date
-): string | null {
-  // Must be recent (within 24h) and not fully watched
-  if (!previousSession.stoppedAt || previousSession.stoppedAt < oneDayAgo) return null;
-  if (previousSession.watched) return null;
-
-  // New session must be resuming from same or later position
-  const prevProgress = previousSession.progressMs || 0;
-  if (newProgressMs >= prevProgress) {
-    // Link to the first session in the chain
-    return previousSession.referenceId || previousSession.id;
-  }
-
-  return null;
 }
 
 describe('Pause Tracking', () => {

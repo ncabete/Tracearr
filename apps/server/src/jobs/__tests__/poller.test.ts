@@ -1,461 +1,430 @@
 /**
- * Poller violation creation tests
+ * Poller Pure Functions Tests
  *
- * Tests the full violation triggering flow:
- * - createViolation function
- * - Trust score decrease based on severity
- * - WebSocket broadcast of violations
- * - Integration with rule evaluation
+ * Tests the extracted pure functions from poller.ts that handle:
+ * - Trust score penalties
+ * - Pause tracking state transitions
+ * - Stop duration calculation
+ * - Watch completion detection
+ * - Session grouping
+ * - Rule applicability
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import type { Rule, Session, ViolationSeverity } from '@tracearr/shared';
-import { RULE_DEFAULTS } from '@tracearr/shared';
+import {
+  getTrustScorePenalty,
+  calculatePauseAccumulation,
+  calculateStopDuration,
+  checkWatchCompletion,
+  shouldGroupWithPreviousSession,
+  formatQualityString,
+  doesRuleApplyToUser,
+} from '../poller.js';
 
-// Mock the database module
-vi.mock('../../db/client.js', () => ({
-  db: {
-    select: vi.fn(),
-    insert: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-  },
-}));
+describe('Trust Score Penalties', () => {
+  describe('getTrustScorePenalty', () => {
+    it('should return 20 for HIGH severity', () => {
+      expect(getTrustScorePenalty('high')).toBe(20);
+    });
 
-// Mock the services
-vi.mock('../../services/plex.js', () => ({
-  PlexService: vi.fn(),
-}));
+    it('should return 10 for WARNING severity', () => {
+      expect(getTrustScorePenalty('warning')).toBe(10);
+    });
 
-vi.mock('../../services/jellyfin.js', () => ({
-  JellyfinService: vi.fn(),
-}));
-
-vi.mock('../../services/geoip.js', () => ({
-  geoipService: {
-    lookup: vi.fn().mockReturnValue({
-      city: 'New York',
-      country: 'US',
-      lat: 40.7128,
-      lon: -74.006,
-    }),
-  },
-}));
-
-// Import the mocked db
-import { db } from '../../db/client.js';
-
-/**
- * Create a mock session
- */
-function createTestSession(overrides: Partial<Session> = {}): Session {
-  return {
-    id: overrides.id ?? randomUUID(),
-    serverId: overrides.serverId ?? randomUUID(),
-    userId: overrides.userId ?? randomUUID(),
-    sessionKey: overrides.sessionKey ?? `session_${Date.now()}`,
-    state: overrides.state ?? 'playing',
-    mediaType: overrides.mediaType ?? 'movie',
-    mediaTitle: overrides.mediaTitle ?? 'Test Movie',
-    grandparentTitle: overrides.grandparentTitle ?? null,
-    seasonNumber: overrides.seasonNumber ?? null,
-    episodeNumber: overrides.episodeNumber ?? null,
-    year: overrides.year ?? 2024,
-    thumbPath: overrides.thumbPath ?? null,
-    ratingKey: overrides.ratingKey ?? null,
-    externalSessionId: overrides.externalSessionId ?? null,
-    startedAt: overrides.startedAt ?? new Date(),
-    stoppedAt: overrides.stoppedAt ?? null,
-    durationMs: overrides.durationMs ?? null,
-    totalDurationMs: overrides.totalDurationMs ?? 7200000,
-    progressMs: overrides.progressMs ?? 0,
-    // Pause tracking
-    lastPausedAt: overrides.lastPausedAt ?? null,
-    pausedDurationMs: overrides.pausedDurationMs ?? 0,
-    referenceId: overrides.referenceId ?? null,
-    watched: overrides.watched ?? false,
-    // Network/device info
-    ipAddress: overrides.ipAddress ?? '192.168.1.1',
-    geoCity: overrides.geoCity ?? 'New York',
-    geoRegion: overrides.geoRegion ?? 'New York',
-    geoCountry: overrides.geoCountry ?? 'US',
-    geoLat: overrides.geoLat ?? 40.7128,
-    geoLon: overrides.geoLon ?? -74.006,
-    playerName: overrides.playerName ?? 'Test Player',
-    deviceId: overrides.deviceId ?? `device_${Date.now()}`,
-    product: overrides.product ?? 'Plex Web',
-    device: overrides.device ?? 'Chrome',
-    platform: overrides.platform ?? 'Windows',
-    quality: overrides.quality ?? '1080p',
-    isTranscode: overrides.isTranscode ?? false,
-    bitrate: overrides.bitrate ?? 10000,
-  };
-}
-
-/**
- * Create a mock rule
- */
-function createTestRule(overrides: Partial<Rule> = {}): Rule {
-  return {
-    id: overrides.id ?? randomUUID(),
-    name: overrides.name ?? 'Test Rule',
-    type: overrides.type ?? 'concurrent_streams',
-    params: overrides.params ?? { ...RULE_DEFAULTS.concurrent_streams },
-    userId: overrides.userId ?? null,
-    isActive: overrides.isActive ?? true,
-    createdAt: overrides.createdAt ?? new Date(),
-    updatedAt: overrides.updatedAt ?? new Date(),
-  };
-}
-
-describe('Violation Creation Flow', () => {
-  let mockDb: any;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDb = db as any;
+    it('should return 5 for LOW severity', () => {
+      expect(getTrustScorePenalty('low')).toBe(5);
+    });
   });
+});
 
-  describe('Trust Score Penalties', () => {
-    it('should apply correct penalty for HIGH severity', async () => {
-      // The poller decreases trust score based on severity:
-      // HIGH: -20, WARNING: -10, LOW: -5
-      const severity: ViolationSeverity = 'high';
-      const expectedPenalty = 20;
+describe('Pause Tracking', () => {
+  describe('calculatePauseAccumulation', () => {
+    it('should record lastPausedAt when transitioning from playing to paused', () => {
+      const now = new Date();
+      const result = calculatePauseAccumulation(
+        'playing',
+        'paused',
+        { lastPausedAt: null, pausedDurationMs: 0 },
+        now
+      );
 
-      // This test validates the penalty logic documented in poller.ts:318
-      expect(severity === 'high' ? 20 : severity === 'warning' ? 10 : 5).toBe(expectedPenalty);
+      expect(result.lastPausedAt).toEqual(now);
+      expect(result.pausedDurationMs).toBe(0);
     });
 
-    it('should apply correct penalty for WARNING severity', async () => {
-      const severity: ViolationSeverity = 'warning';
-      const expectedPenalty = 10;
-      const sev = severity as ViolationSeverity;
-      expect(sev === 'high' ? 20 : sev === 'warning' ? 10 : 5).toBe(expectedPenalty);
+    it('should accumulate pause duration when transitioning from paused to playing', () => {
+      const pauseStart = new Date('2024-01-01T10:00:00Z');
+      const resumeTime = new Date('2024-01-01T10:30:00Z'); // 30 minutes later
+
+      const result = calculatePauseAccumulation(
+        'paused',
+        'playing',
+        { lastPausedAt: pauseStart, pausedDurationMs: 0 },
+        resumeTime
+      );
+
+      expect(result.lastPausedAt).toBeNull();
+      expect(result.pausedDurationMs).toBe(30 * 60 * 1000); // 30 minutes in ms
     });
 
-    it('should apply correct penalty for LOW severity', async () => {
-      const severity: ViolationSeverity = 'low';
-      const expectedPenalty = 5;
-      const sev = severity as ViolationSeverity;
-      expect(sev === 'high' ? 20 : sev === 'warning' ? 10 : 5).toBe(expectedPenalty);
+    it('should accumulate multiple pause cycles correctly', () => {
+      const times = {
+        pause1: new Date('2024-01-01T10:05:00Z'),
+        resume1: new Date('2024-01-01T10:10:00Z'), // 5 min pause
+        pause2: new Date('2024-01-01T10:15:00Z'),
+        resume2: new Date('2024-01-01T10:25:00Z'), // 10 min pause
+      };
+
+      // First pause
+      let session = { lastPausedAt: null as Date | null, pausedDurationMs: 0 };
+      session = calculatePauseAccumulation('playing', 'paused', session, times.pause1);
+      expect(session.lastPausedAt).toEqual(times.pause1);
+
+      // First resume - 5 min accumulated
+      session = calculatePauseAccumulation('paused', 'playing', session, times.resume1);
+      expect(session.pausedDurationMs).toBe(5 * 60 * 1000);
+
+      // Second pause
+      session = calculatePauseAccumulation('playing', 'paused', session, times.pause2);
+      expect(session.lastPausedAt).toEqual(times.pause2);
+
+      // Second resume - 15 min total (5 + 10)
+      session = calculatePauseAccumulation('paused', 'playing', session, times.resume2);
+      expect(session.pausedDurationMs).toBe(15 * 60 * 1000);
+      expect(session.lastPausedAt).toBeNull();
     });
 
-    it('should not allow trust score below 0', async () => {
-      // The GREATEST(0, trust_score - penalty) in poller.ts:322 ensures minimum of 0
-      const currentScore = 3;
-      const penalty = 20;
-      const newScore = Math.max(0, currentScore - penalty);
+    it('should not change anything for playing to playing transition', () => {
+      const now = new Date();
+      const existingSession = { lastPausedAt: null, pausedDurationMs: 5000 };
 
-      expect(newScore).toBe(0);
+      const result = calculatePauseAccumulation('playing', 'playing', existingSession, now);
+
+      expect(result.lastPausedAt).toBeNull();
+      expect(result.pausedDurationMs).toBe(5000);
+    });
+
+    it('should not change anything for paused to paused transition', () => {
+      const pausedAt = new Date('2024-01-01T10:00:00Z');
+      const now = new Date('2024-01-01T10:30:00Z');
+      const existingSession = { lastPausedAt: pausedAt, pausedDurationMs: 5000 };
+
+      const result = calculatePauseAccumulation('paused', 'paused', existingSession, now);
+
+      expect(result.lastPausedAt).toEqual(pausedAt);
+      expect(result.pausedDurationMs).toBe(5000);
     });
   });
 
-  describe('Violation Data Storage', () => {
-    it('should store violation with all required fields', async () => {
-      const violationId = randomUUID();
-      const ruleId = randomUUID();
-      const userId = randomUUID();
-      const sessionId = randomUUID();
+  describe('calculateStopDuration', () => {
+    it('should calculate correct duration for session with no pauses', () => {
+      const startedAt = new Date('2024-01-01T10:00:00Z');
+      const stoppedAt = new Date('2024-01-01T12:00:00Z'); // 2 hours later
 
-      // Mock insert returning the created violation
-      mockDb.insert.mockReturnValue({
-        values: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([{
-            id: violationId,
-            ruleId,
-            userId,
-            sessionId,
-            severity: 'high',
-            data: { reason: 'test' },
-            acknowledgedAt: null,
-            createdAt: new Date(),
-          }]),
-        }),
-      });
+      const result = calculateStopDuration(
+        { startedAt, lastPausedAt: null, pausedDurationMs: 0 },
+        stoppedAt
+      );
 
-      // Verify the structure matches what createViolation expects
-      const violationData = {
-        ruleId,
-        userId,
-        sessionId,
-        severity: 'high' as ViolationSeverity,
-        data: { reason: 'test' },
-      };
-
-      expect(violationData.ruleId).toBe(ruleId);
-      expect(violationData.userId).toBe(userId);
-      expect(violationData.sessionId).toBe(sessionId);
-      expect(violationData.severity).toBe('high');
+      expect(result.durationMs).toBe(2 * 60 * 60 * 1000); // 2 hours
+      expect(result.finalPausedDurationMs).toBe(0);
     });
 
-    it('should include violation data from rule evaluation', async () => {
-      // Rule evaluation returns data specific to each rule type
-      const impossibleTravelData = {
-        distanceKm: 5000,
-        timeHours: 1,
-        calculatedSpeedKmh: 5000,
-        maxAllowedSpeedKmh: 500,
-        previousLocation: { city: 'New York', country: 'US' },
-        currentLocation: { city: 'London', country: 'GB' },
-      };
+    it('should exclude accumulated pause time from duration', () => {
+      const startedAt = new Date('2024-01-01T10:00:00Z');
+      const stoppedAt = new Date('2024-01-01T12:00:00Z'); // 2 hours elapsed
 
-      const concurrentStreamsData = {
-        maxStreams: 3,
-        actualStreams: 5,
-      };
+      const result = calculateStopDuration(
+        {
+          startedAt,
+          lastPausedAt: null,
+          pausedDurationMs: 30 * 60 * 1000, // 30 minutes paused
+        },
+        stoppedAt
+      );
 
-      const geoRestrictionData = {
-        blockedCountry: 'CN',
-        streamCountry: 'CN',
-      };
-
-      // Each rule type should store appropriate context data
-      expect(impossibleTravelData.calculatedSpeedKmh).toBeGreaterThan(impossibleTravelData.maxAllowedSpeedKmh);
-      expect(concurrentStreamsData.actualStreams).toBeGreaterThan(concurrentStreamsData.maxStreams);
-      expect(geoRestrictionData.blockedCountry).toBe(geoRestrictionData.streamCountry);
-    });
-  });
-
-  describe('Severity Assignment', () => {
-    it('should assign HIGH severity for impossible travel', () => {
-      // From rules.ts: impossible_travel → HIGH severity
-      const ruleType = 'impossible_travel';
-      const expectedSeverity: ViolationSeverity = 'high';
-
-      // This matches the implementation in RuleEngine
-      const severityMap: Record<string, ViolationSeverity> = {
-        impossible_travel: 'high',
-        geo_restriction: 'high',
-        simultaneous_locations: 'warning',
-        device_velocity: 'warning',
-        concurrent_streams: 'low',
-      };
-
-      expect(severityMap[ruleType]).toBe(expectedSeverity);
+      // 2 hours - 30 minutes = 1.5 hours
+      expect(result.durationMs).toBe(1.5 * 60 * 60 * 1000);
+      expect(result.finalPausedDurationMs).toBe(30 * 60 * 1000);
     });
 
-    it('should assign HIGH severity for geo restriction', () => {
-      const severityMap: Record<string, ViolationSeverity> = {
-        impossible_travel: 'high',
-        geo_restriction: 'high',
-        simultaneous_locations: 'warning',
-        device_velocity: 'warning',
-        concurrent_streams: 'low',
-      };
+    it('should include remaining pause time if stopped while paused', () => {
+      const startedAt = new Date('2024-01-01T10:00:00Z');
+      const pausedAt = new Date('2024-01-01T11:30:00Z');
+      const stoppedAt = new Date('2024-01-01T12:00:00Z');
 
-      expect(severityMap['geo_restriction']).toBe('high');
+      const result = calculateStopDuration(
+        {
+          startedAt,
+          lastPausedAt: pausedAt, // Currently paused
+          pausedDurationMs: 15 * 60 * 1000, // 15 minutes already accumulated
+        },
+        stoppedAt
+      );
+
+      // Total elapsed: 2 hours
+      // Paused: 15 min (previous) + 30 min (current) = 45 min
+      // Watch time: 2 hours - 45 min = 1.25 hours
+      expect(result.finalPausedDurationMs).toBe(45 * 60 * 1000);
+      expect(result.durationMs).toBe(1.25 * 60 * 60 * 1000);
     });
 
-    it('should assign WARNING severity for simultaneous locations', () => {
-      const severityMap: Record<string, ViolationSeverity> = {
-        impossible_travel: 'high',
-        geo_restriction: 'high',
-        simultaneous_locations: 'warning',
-        device_velocity: 'warning',
-        concurrent_streams: 'low',
-      };
+    it('should not return negative duration', () => {
+      const startedAt = new Date('2024-01-01T10:00:00Z');
+      const stoppedAt = new Date('2024-01-01T10:30:00Z'); // 30 minutes
 
-      expect(severityMap['simultaneous_locations']).toBe('warning');
-    });
+      const result = calculateStopDuration(
+        {
+          startedAt,
+          lastPausedAt: null,
+          pausedDurationMs: 60 * 60 * 1000, // 1 hour paused (more than elapsed!)
+        },
+        stoppedAt
+      );
 
-    it('should assign WARNING severity for device velocity', () => {
-      const severityMap: Record<string, ViolationSeverity> = {
-        impossible_travel: 'high',
-        geo_restriction: 'high',
-        simultaneous_locations: 'warning',
-        device_velocity: 'warning',
-        concurrent_streams: 'low',
-      };
-
-      expect(severityMap['device_velocity']).toBe('warning');
-    });
-
-    it('should assign LOW severity for concurrent streams', () => {
-      const severityMap: Record<string, ViolationSeverity> = {
-        impossible_travel: 'high',
-        geo_restriction: 'high',
-        simultaneous_locations: 'warning',
-        device_velocity: 'warning',
-        concurrent_streams: 'low',
-      };
-
-      expect(severityMap['concurrent_streams']).toBe('low');
+      // Should be capped at 0
+      expect(result.durationMs).toBe(0);
     });
   });
+});
 
-  describe('Rule Filtering', () => {
-    it('should apply global rules (userId=null) to all users', () => {
-      const globalRule = createTestRule({ userId: null });
-      const anyUserId = randomUUID();
-
-      // Global rules apply when rule.userId is null
-      const ruleApplies = globalRule.userId === null || globalRule.userId === anyUserId;
-      expect(ruleApplies).toBe(true);
+describe('Watch Completion Detection', () => {
+  describe('checkWatchCompletion', () => {
+    it('should return true when progress >= 80%', () => {
+      expect(checkWatchCompletion(8000, 10000)).toBe(true); // Exactly 80%
+      expect(checkWatchCompletion(9000, 10000)).toBe(true); // 90%
+      expect(checkWatchCompletion(10000, 10000)).toBe(true); // 100%
     });
 
-    it('should apply user-specific rules only to that user', () => {
+    it('should return false when progress < 80%', () => {
+      expect(checkWatchCompletion(7999, 10000)).toBe(false); // Just under 80%
+      expect(checkWatchCompletion(5000, 10000)).toBe(false); // 50%
+      expect(checkWatchCompletion(1000, 10000)).toBe(false); // 10%
+    });
+
+    it('should return false when progressMs is null', () => {
+      expect(checkWatchCompletion(null, 10000)).toBe(false);
+    });
+
+    it('should return false when totalDurationMs is null', () => {
+      expect(checkWatchCompletion(8000, null)).toBe(false);
+    });
+
+    it('should return false when both are null', () => {
+      expect(checkWatchCompletion(null, null)).toBe(false);
+    });
+  });
+});
+
+describe('Session Grouping', () => {
+  describe('shouldGroupWithPreviousSession', () => {
+    it('should group with previous session when resuming', () => {
+      const previousSessionId = randomUUID();
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const result = shouldGroupWithPreviousSession(
+        {
+          id: previousSessionId,
+          referenceId: null,
+          progressMs: 30 * 60 * 1000, // 30 minutes
+          watched: false,
+          stoppedAt: new Date(), // Recent
+        },
+        30 * 60 * 1000, // Starting from same position
+        oneDayAgo
+      );
+
+      expect(result).toBe(previousSessionId);
+    });
+
+    it('should use existing referenceId if previous session was already grouped', () => {
+      const originalSessionId = randomUUID();
+      const previousSessionId = randomUUID();
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const result = shouldGroupWithPreviousSession(
+        {
+          id: previousSessionId,
+          referenceId: originalSessionId, // Already linked
+          progressMs: 60 * 60 * 1000,
+          watched: false,
+          stoppedAt: new Date(),
+        },
+        60 * 60 * 1000,
+        oneDayAgo
+      );
+
+      expect(result).toBe(originalSessionId);
+    });
+
+    it('should not group if previous session was fully watched', () => {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const result = shouldGroupWithPreviousSession(
+        {
+          id: randomUUID(),
+          referenceId: null,
+          progressMs: 90 * 60 * 1000,
+          watched: true, // Already watched
+          stoppedAt: new Date(),
+        },
+        0, // Starting fresh
+        oneDayAgo
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('should not group if previous session is older than 24 hours', () => {
+      const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const result = shouldGroupWithPreviousSession(
+        {
+          id: randomUUID(),
+          referenceId: null,
+          progressMs: 30 * 60 * 1000,
+          watched: false,
+          stoppedAt: twoDaysAgo, // Too old
+        },
+        30 * 60 * 1000,
+        oneDayAgo
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('should not group if new progress is less than previous (rewinding)', () => {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const result = shouldGroupWithPreviousSession(
+        {
+          id: randomUUID(),
+          referenceId: null,
+          progressMs: 60 * 60 * 1000, // 1 hour in
+          watched: false,
+          stoppedAt: new Date(),
+        },
+        30 * 60 * 1000, // Only 30 minutes - user rewound
+        oneDayAgo
+      );
+
+      expect(result).toBeNull();
+    });
+  });
+});
+
+describe('Quality String Formatting', () => {
+  describe('formatQualityString', () => {
+    it('should format bitrate in Mbps when transcoding bitrate available', () => {
+      expect(formatQualityString(8000000, 0, false)).toBe('8Mbps');
+      expect(formatQualityString(10000000, 0, true)).toBe('10Mbps');
+    });
+
+    it('should fall back to source bitrate when transcode bitrate is 0', () => {
+      expect(formatQualityString(0, 12000000, false)).toBe('12Mbps');
+    });
+
+    it('should return "Transcoding" when no bitrate but is transcoding', () => {
+      expect(formatQualityString(0, 0, true)).toBe('Transcoding');
+    });
+
+    it('should return "Direct" when no bitrate and not transcoding', () => {
+      expect(formatQualityString(0, 0, false)).toBe('Direct');
+    });
+
+    it('should round bitrate correctly', () => {
+      expect(formatQualityString(8500000, 0, false)).toBe('9Mbps'); // Rounds up
+      expect(formatQualityString(8400000, 0, false)).toBe('8Mbps'); // Rounds down
+    });
+  });
+});
+
+describe('Rule Applicability', () => {
+  describe('doesRuleApplyToUser', () => {
+    it('should apply global rules (userId=null) to any user', () => {
+      const globalRule = { userId: null };
+      expect(doesRuleApplyToUser(globalRule, randomUUID())).toBe(true);
+      expect(doesRuleApplyToUser(globalRule, randomUUID())).toBe(true);
+    });
+
+    it('should apply user-specific rule only to that user', () => {
       const targetUserId = randomUUID();
       const otherUserId = randomUUID();
-      const userRule = createTestRule({ userId: targetUserId });
+      const userRule = { userId: targetUserId };
 
-      // User-specific rule applies only to that user
-      const appliesToTarget = userRule.userId === null || userRule.userId === targetUserId;
-      const appliesToOther = userRule.userId === null || userRule.userId === otherUserId;
-
-      expect(appliesToTarget).toBe(true);
-      expect(appliesToOther).toBe(false);
-    });
-
-    it('should only evaluate active rules', () => {
-      const activeRule = createTestRule({ isActive: true });
-      const inactiveRule = createTestRule({ isActive: false });
-
-      expect(activeRule.isActive).toBe(true);
-      expect(inactiveRule.isActive).toBe(false);
+      expect(doesRuleApplyToUser(userRule, targetUserId)).toBe(true);
+      expect(doesRuleApplyToUser(userRule, otherUserId)).toBe(false);
     });
   });
+});
 
-  describe('WebSocket Event Structure', () => {
-    it('should include all required fields in violation broadcast', () => {
-      // ViolationWithDetails structure from shared/types.ts
-      const violationEvent = {
-        id: randomUUID(),
-        ruleId: randomUUID(),
-        userId: randomUUID(),
-        sessionId: randomUUID(),
-        severity: 'high' as ViolationSeverity,
-        data: { reason: 'test' },
-        acknowledgedAt: null,
-        createdAt: new Date(),
-        user: {
-          id: randomUUID(),
-          username: 'testuser',
-          thumbUrl: null,
-        },
-        rule: {
-          id: randomUUID(),
-          name: 'Test Rule',
-          type: 'impossible_travel' as const,
-        },
-      };
+describe('Integration Scenarios', () => {
+  it('should handle complete watch session with multiple pauses', () => {
+    // Scenario: Watch 2-hour movie with breaks
+    const times = {
+      start: new Date('2024-01-01T10:00:00Z'),
+      pause1: new Date('2024-01-01T10:30:00Z'),
+      resume1: new Date('2024-01-01T10:45:00Z'), // 15 min pause
+      pause2: new Date('2024-01-01T11:30:00Z'),
+      resume2: new Date('2024-01-01T12:00:00Z'), // 30 min pause
+      stop: new Date('2024-01-01T12:45:00Z'),
+    };
 
-      // Verify all required fields are present
-      expect(violationEvent).toHaveProperty('id');
-      expect(violationEvent).toHaveProperty('ruleId');
-      expect(violationEvent).toHaveProperty('userId');
-      expect(violationEvent).toHaveProperty('sessionId');
-      expect(violationEvent).toHaveProperty('severity');
-      expect(violationEvent).toHaveProperty('data');
-      expect(violationEvent).toHaveProperty('user');
-      expect(violationEvent).toHaveProperty('rule');
-      expect(violationEvent.user).toHaveProperty('username');
-      expect(violationEvent.rule).toHaveProperty('name');
-      expect(violationEvent.rule).toHaveProperty('type');
-    });
+    // Simulate state transitions
+    let session = { lastPausedAt: null as Date | null, pausedDurationMs: 0 };
 
-    it('should use correct WebSocket event name', () => {
-      // From shared/constants.ts: WS_EVENTS.VIOLATION_NEW = 'violation:new'
-      const expectedEventName = 'violation:new';
-      expect(expectedEventName).toBe('violation:new');
-    });
+    session = calculatePauseAccumulation('playing', 'paused', session, times.pause1);
+    session = calculatePauseAccumulation('paused', 'playing', session, times.resume1);
+    session = calculatePauseAccumulation('playing', 'paused', session, times.pause2);
+    session = calculatePauseAccumulation('paused', 'playing', session, times.resume2);
+
+    expect(session.pausedDurationMs).toBe(45 * 60 * 1000); // 45 min total
+
+    // Calculate final duration
+    const result = calculateStopDuration(
+      { startedAt: times.start, ...session },
+      times.stop
+    );
+
+    // Wall clock: 2h 45m = 165 min
+    // Paused: 45 min
+    // Watch time: 120 min
+    expect(result.durationMs).toBe(120 * 60 * 1000);
   });
 
-  describe('Session to Violation Mapping', () => {
-    it('should link violation to the triggering session', () => {
-      const session = createTestSession();
-      const rule = createTestRule();
+  it('should correctly chain session groups', () => {
+    const session1Id = randomUUID();
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      // Violation should reference the session that triggered it
-      const violation = {
-        sessionId: session.id,
-        userId: session.userId,
-        ruleId: rule.id,
-      };
+    // First resume - links to session1
+    const ref1 = shouldGroupWithPreviousSession(
+      {
+        id: session1Id,
+        referenceId: null,
+        progressMs: 30 * 60 * 1000,
+        watched: false,
+        stoppedAt: new Date(),
+      },
+      30 * 60 * 1000,
+      oneDayAgo
+    );
+    expect(ref1).toBe(session1Id);
 
-      expect(violation.sessionId).toBe(session.id);
-      expect(violation.userId).toBe(session.userId);
-    });
-
-    it('should use session user for violation', () => {
-      const userId = randomUUID();
-      const session = createTestSession({ userId });
-
-      // The violation's userId comes from the session's userId
-      expect(session.userId).toBe(userId);
-    });
-  });
-
-  describe('Multiple Violations per Session', () => {
-    it('should allow multiple rules to trigger on same session', () => {
-      const session = createTestSession({
-        geoCountry: 'CN', // Blocked country
-      });
-
-      // A single session can trigger multiple rules
-      const geoRule = createTestRule({ type: 'geo_restriction' });
-      const concurrentRule = createTestRule({ type: 'concurrent_streams' });
-
-      // Both rules can evaluate the same session
-      const violations = [
-        { ruleId: geoRule.id, sessionId: session.id },
-        { ruleId: concurrentRule.id, sessionId: session.id },
-      ];
-
-      expect(violations).toHaveLength(2);
-      expect(violations[0]!.sessionId).toBe(violations[1]!.sessionId);
-      expect(violations[0]!.ruleId).not.toBe(violations[1]!.ruleId);
-    });
-
-    it('should create separate violation records for each triggered rule', () => {
-      const sessionId = randomUUID();
-      const violations = [
-        { id: randomUUID(), ruleId: randomUUID(), sessionId },
-        { id: randomUUID(), ruleId: randomUUID(), sessionId },
-      ];
-
-      // Each violation has a unique ID
-      expect(violations[0]!.id).not.toBe(violations[1]!.id);
-      // But same session
-      expect(violations[0]!.sessionId).toBe(violations[1]!.sessionId);
-    });
-  });
-
-  describe('Trust Score Accumulation', () => {
-    it('should decrease trust score for each violation', () => {
-      // Multiple violations should stack penalties
-      const initialScore = 100;
-      const violations = [
-        { severity: 'high' as ViolationSeverity },   // -20
-        { severity: 'warning' as ViolationSeverity }, // -10
-        { severity: 'low' as ViolationSeverity },     // -5
-      ];
-
-      let score = initialScore;
-      for (const v of violations) {
-        const penalty = v.severity === 'high' ? 20 : v.severity === 'warning' ? 10 : 5;
-        score = Math.max(0, score - penalty);
-      }
-
-      // 100 - 20 - 10 - 5 = 65
-      expect(score).toBe(65);
-    });
-
-    it('should cap trust score at 0', () => {
-      const initialScore = 10;
-      const violations = [
-        { severity: 'high' as ViolationSeverity }, // -20
-      ];
-
-      let score = initialScore;
-      for (const v of violations) {
-        const penalty = v.severity === 'high' ? 20 : v.severity === 'warning' ? 10 : 5;
-        score = Math.max(0, score - penalty);
-      }
-
-      // 10 - 20 = -10, but capped at 0
-      expect(score).toBe(0);
-    });
+    // Second resume - should still link to original session1
+    const session2Id = randomUUID();
+    const ref2 = shouldGroupWithPreviousSession(
+      {
+        id: session2Id,
+        referenceId: session1Id, // Already linked to session1
+        progressMs: 60 * 60 * 1000,
+        watched: false,
+        stoppedAt: new Date(),
+      },
+      60 * 60 * 1000,
+      oneDayAgo
+    );
+    expect(ref2).toBe(session1Id); // Still links to original
   });
 });
