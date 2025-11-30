@@ -33,11 +33,13 @@ Unlike monitoring tools that just show you data, Tracearr is built to detect acc
 
 **Real-Time Alerts** — Discord webhooks and custom notifications fire instantly when rules trigger. No waiting for daily reports.
 
-**Stream Map** — Visualize where your streams originate on an interactive world map. See the problem at a glance.
+**Stream Map** — Visualize where your streams originate on an interactive world map. Filter by user, server, or time period to zero in on suspicious patterns.
 
 **Trust Scores** — Users earn (or lose) trust based on their behavior. Violations drop scores automatically.
 
 **Multi-Server** — Connect Plex and Jellyfin instances to the same dashboard. Manage everything in one place.
+
+**Tautulli Import** — Already using Tautulli? Import your watch history so you don't start from scratch.
 
 ## What It Doesn't Do (Yet)
 
@@ -56,6 +58,7 @@ Tracearr v1 is focused on **detection and alerting**. Automated enforcement—ki
 | Trust scoring | ❌ | ✅ |
 | Jellyfin support | ❌ | ✅ |
 | Multi-server dashboard | ❌ | ✅ |
+| Import from Tautulli | — | ✅ |
 
 If you just want to see stats, Tautulli works fine. If you're tired of your brother's roommate's cousin streaming on your dime, that's what Tracearr is for.
 
@@ -76,7 +79,7 @@ Open `http://localhost:3000` and connect your Plex or Jellyfin server.
 | `latest` | Stable releases |
 | `next` | Latest prerelease (alpha/beta/rc) |
 | `nightly` | Bleeding edge, built daily from main |
-| `0.1.0-alpha.6` | Specific version |
+| `0.1.0-alpha.9` | Specific version |
 
 ```bash
 # Stable
@@ -122,6 +125,10 @@ Frontend runs at `localhost:5173`, API at `localhost:3000`.
 | Cache | Redis |
 | Real-time | Socket.io |
 | Monorepo | pnpm + Turborepo |
+
+**TimescaleDB** handles session history. Regular Postgres works fine until you have a year of watch data and your stats queries start taking forever. TimescaleDB is built for exactly this kind of time-series data—dashboard stats stay fast because they're pre-computed, not recalculated every page load.
+
+**Fastify** over Express because it's measurably faster and the schema validation is nice. When you're polling servers every 15 seconds, the little things add up.
 
 ## Project Structure
 
@@ -179,7 +186,7 @@ Check the [issues](https://github.com/connorgallopo/Tracearr/issues) for things 
 
 ## Roadmap
 
-**v1.0** (current)
+**Alpha** (current — v0.1.x)
 - [x] Multi-server Plex + Jellyfin support
 - [x] Session tracking with full history
 - [x] 5 sharing detection rules
@@ -187,8 +194,9 @@ Check the [issues](https://github.com/connorgallopo/Tracearr/issues) for things 
 - [x] Discord + webhook notifications
 - [x] Interactive stream map
 - [x] Trust scores
+- [x] Tautulli history import
 
-**v1.1** (planned)
+**v1.0** (next milestone)
 - [ ] Stream termination (kill suspicious streams)
 - [ ] Account suspension automation
 - [ ] Email notifications
