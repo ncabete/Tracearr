@@ -45,6 +45,10 @@ export interface JellyfinSession {
       Primary?: string;
     };
     seriesPrimaryImageTag?: string; // Show poster tag (for episodes)
+    // Source bitrate for direct play
+    mediaSources?: Array<{
+      bitrate?: number;
+    }>;
   };
   playState?: {
     positionTicks: number;
@@ -71,6 +75,39 @@ export interface JellyfinUser {
   isDisabled: boolean;
   lastLoginDate: string | null;
   lastActivityDate: string | null;
+}
+
+/**
+ * Played item from watch history
+ * Note: Unlike Tautulli, this only returns WHAT was watched, not session details (IP, device, etc.)
+ */
+export interface JellyfinPlayedItem {
+  id: string;
+  name: string;
+  type: string;
+  seriesName?: string;
+  parentIndexNumber?: number;
+  indexNumber?: number;
+  productionYear?: number;
+  runTimeTicks: number;
+  playCount: number;
+  lastPlayedDate: string | null;
+}
+
+/**
+ * Activity log entry from Jellyfin
+ * Useful for detecting login attempts, playback events, etc.
+ */
+export interface JellyfinActivityEntry {
+  id: number;
+  name: string;
+  overview?: string;
+  shortOverview?: string;
+  type: string;
+  itemId?: string;
+  userId?: string;
+  date: string;
+  severity: string;
 }
 
 interface JellyfinAuthResponse {
@@ -150,6 +187,12 @@ export class JellyfinService {
                 // Poster fields
                 imageTags: imageTags ? { Primary: imageTags.Primary } : undefined,
                 seriesPrimaryImageTag: nowPlaying.SeriesPrimaryImageTag ? String(nowPlaying.SeriesPrimaryImageTag) : undefined,
+                // Source bitrate for direct play
+                mediaSources: Array.isArray(nowPlaying.MediaSources)
+                  ? (nowPlaying.MediaSources as Array<Record<string, unknown>>).map(ms => ({
+                      bitrate: ms.Bitrate ? Number(ms.Bitrate) : undefined,
+                    }))
+                  : undefined,
               }
             : undefined,
           playState: session.PlayState
@@ -221,6 +264,116 @@ export class JellyfinService {
       locations: Array.isArray(folder.Locations)
         ? (folder.Locations as string[])
         : [],
+    }));
+  }
+
+  /**
+   * Get watch history for a specific user
+   * Note: Unlike Tautulli, this only returns WHAT was watched, not session details (IP, device, etc.)
+   * For full session history, users would need Jellystat or the Playback Reporting plugin.
+   */
+  async getWatchHistory(userId: string, limit = 500): Promise<JellyfinPlayedItem[]> {
+    const params = new URLSearchParams({
+      Recursive: 'true',
+      IncludeItemTypes: 'Movie,Episode',
+      Filters: 'IsPlayed',
+      SortBy: 'DatePlayed',
+      SortOrder: 'Descending',
+      Limit: String(limit),
+      Fields: 'MediaSources',
+    });
+
+    const response = await fetch(
+      `${this.baseUrl}/Users/${userId}/Items?${params}`,
+      { headers: this.buildHeaders() }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Jellyfin watch history failed: ${response.status}`);
+    }
+
+    const data = await response.json() as { Items?: Record<string, unknown>[] };
+    const items = data.Items ?? [];
+
+    return items.map(item => {
+      const userData = item.UserData as Record<string, unknown> | undefined;
+      return {
+        id: String(item.Id ?? ''),
+        name: String(item.Name ?? ''),
+        type: String(item.Type ?? ''),
+        seriesName: item.SeriesName ? String(item.SeriesName) : undefined,
+        parentIndexNumber: item.ParentIndexNumber ? Number(item.ParentIndexNumber) : undefined,
+        indexNumber: item.IndexNumber ? Number(item.IndexNumber) : undefined,
+        productionYear: item.ProductionYear ? Number(item.ProductionYear) : undefined,
+        runTimeTicks: Number(item.RunTimeTicks ?? 0),
+        playCount: Number(userData?.PlayCount ?? 0),
+        lastPlayedDate: userData?.LastPlayedDate ? String(userData.LastPlayedDate) : null,
+      };
+    });
+  }
+
+  /**
+   * Get watch history for all users on the server
+   */
+  async getAllUsersWatchHistory(limit = 200): Promise<Map<string, JellyfinPlayedItem[]>> {
+    const allUsers = await this.getUsers();
+    const historyMap = new Map<string, JellyfinPlayedItem[]>();
+
+    for (const user of allUsers) {
+      if (user.isDisabled) continue;
+      try {
+        const history = await this.getWatchHistory(user.id, limit);
+        historyMap.set(user.id, history);
+      } catch (error) {
+        console.error(`Failed to get history for user ${user.name}:`, error);
+      }
+    }
+
+    return historyMap;
+  }
+
+  /**
+   * Get activity log entries (requires admin)
+   * Useful for detecting login attempts, playback events, etc.
+   *
+   * Activity types to watch for:
+   * - AuthenticationSucceeded - Successful login
+   * - AuthenticationFailed - Failed login attempt
+   * - SessionStarted - New session
+   * - SessionEnded - Session ended
+   */
+  async getActivityLog(options?: {
+    minDate?: Date;
+    limit?: number;
+    hasUserId?: boolean;
+  }): Promise<JellyfinActivityEntry[]> {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', String(options.limit));
+    if (options?.minDate) params.append('minDate', options.minDate.toISOString());
+    if (options?.hasUserId !== undefined) params.append('hasUserId', String(options.hasUserId));
+
+    const response = await fetch(
+      `${this.baseUrl}/System/ActivityLog/Entries?${params}`,
+      { headers: this.buildHeaders() }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Jellyfin activity log failed: ${response.status}`);
+    }
+
+    const data = await response.json() as { Items?: Record<string, unknown>[] };
+    const items = data.Items ?? [];
+
+    return items.map(item => ({
+      id: Number(item.Id ?? 0),
+      name: String(item.Name ?? ''),
+      overview: item.Overview ? String(item.Overview) : undefined,
+      shortOverview: item.ShortOverview ? String(item.ShortOverview) : undefined,
+      type: String(item.Type ?? ''),
+      itemId: item.ItemId ? String(item.ItemId) : undefined,
+      userId: item.UserId ? String(item.UserId) : undefined,
+      date: String(item.Date ?? ''),
+      severity: String(item.Severity ?? 'Information'),
     }));
   }
 
