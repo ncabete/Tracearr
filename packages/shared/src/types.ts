@@ -36,6 +36,7 @@ export interface AuthUser {
   username: string;
   role: UserRole;
   serverIds: string[];
+  mobile?: boolean; // True for mobile app tokens
 }
 
 // Session types
@@ -388,4 +389,101 @@ export interface ApiError {
   statusCode: number;
   error: string;
   message: string;
+}
+
+// ============================================
+// Mobile App Types
+// ============================================
+
+// Mobile access token (for QR code pairing)
+export interface MobileToken {
+  id: string;
+  isEnabled: boolean;
+  createdAt: Date;
+  rotatedAt: Date | null;
+}
+
+// Mobile session (paired device)
+export interface MobileSession {
+  id: string;
+  deviceName: string;
+  deviceId: string;
+  platform: 'ios' | 'android';
+  expoPushToken: string | null;
+  lastSeenAt: Date;
+  createdAt: Date;
+}
+
+// Mobile config returned to web dashboard
+export interface MobileConfig {
+  isEnabled: boolean;
+  token: string | null; // Only returned when enabled, null otherwise
+  serverName: string;
+  sessions: MobileSession[];
+}
+
+// Mobile pairing request (from mobile app)
+export interface MobilePairRequest {
+  token: string; // Mobile access token from QR/manual entry
+  deviceName: string; // e.g., "iPhone 15 Pro"
+  deviceId: string; // Unique device identifier
+  platform: 'ios' | 'android';
+}
+
+// Mobile pairing response
+export interface MobilePairResponse {
+  accessToken: string;
+  refreshToken: string;
+  server: {
+    name: string;
+    url: string;
+  };
+  user: {
+    userId: string;
+    username: string;
+    role: 'owner'; // Mobile access is owner-only for v1
+  };
+}
+
+// QR code payload (base64 encoded in tracearr://pair?data=<base64>)
+export interface MobileQRPayload {
+  url: string; // Server URL
+  token: string; // Mobile access token
+  name: string; // Server name
+}
+
+// Notification event types
+export type NotificationEventType =
+  | 'violation_detected'
+  | 'stream_started'
+  | 'stream_stopped'
+  | 'concurrent_streams'
+  | 'new_device'
+  | 'trust_score_changed'
+  | 'server_down'
+  | 'server_up';
+
+// Notification preferences (for future phases)
+export interface NotificationPreferences {
+  pushEnabled: boolean;
+  onViolationDetected: boolean;
+  onStreamStarted: boolean;
+  onStreamStopped: boolean;
+  onConcurrentStreams: boolean;
+  onNewDevice: boolean;
+  onTrustScoreChanged: boolean;
+  onServerDown: boolean;
+  onServerUp: boolean;
+  violationRuleTypes: RuleType[];
+  violationMinSeverity: 1 | 2 | 3; // 1=low, 2=warning, 3=high
+  concurrentThreshold: number;
+  quietHours: {
+    enabled: boolean;
+    start: string; // "23:00"
+    end: string; // "08:00"
+    timezone: string;
+    overrideCritical: boolean;
+  };
+  maxPerMinute: number;
+  maxPerHour: number;
 }

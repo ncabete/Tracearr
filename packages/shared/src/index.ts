@@ -57,6 +57,15 @@ export type {
   // API
   PaginatedResponse,
   ApiError,
+  // Mobile
+  MobileToken,
+  MobileSession,
+  MobileConfig,
+  MobilePairRequest,
+  MobilePairResponse,
+  MobileQRPayload,
+  NotificationEventType,
+  NotificationPreferences,
 } from './types.js';
 
 // Schema exports
