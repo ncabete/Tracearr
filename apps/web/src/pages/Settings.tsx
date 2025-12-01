@@ -37,6 +37,8 @@ import {
   Copy,
   RotateCcw,
   LogOut,
+  Globe,
+  AlertTriangle,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -60,6 +62,7 @@ function SettingsNav() {
   const links = [
     { href: '/settings', label: 'General', end: true },
     { href: '/settings/servers', label: 'Servers' },
+    { href: '/settings/network', label: 'Network' },
     { href: '/settings/notifications', label: 'Notifications' },
     { href: '/settings/access', label: 'Access Control' },
     { href: '/settings/mobile', label: 'Mobile' },
@@ -525,8 +528,213 @@ function AccessSettings() {
   );
 }
 
+function NetworkSettings() {
+  const { data: settings, isLoading } = useSettings();
+  const updateSettings = useUpdateSettings();
+
+  const [externalUrl, setExternalUrl] = useState('');
+  const [basePath, setBasePath] = useState('');
+
+  useEffect(() => {
+    if (settings) {
+      setExternalUrl(settings.externalUrl ?? '');
+      setBasePath(settings.basePath ?? '');
+    }
+  }, [settings]);
+
+  const handleToggleTrustProxy = (enabled: boolean) => {
+    updateSettings.mutate({ trustProxy: enabled });
+  };
+
+  const handleSaveExternalUrl = () => {
+    updateSettings.mutate({ externalUrl: externalUrl || null });
+  };
+
+  const handleSaveBasePath = () => {
+    updateSettings.mutate({ basePath: basePath });
+  };
+
+  const handleDetectUrl = () => {
+    let detectedUrl = window.location.origin;
+    if (import.meta.env.DEV) {
+      detectedUrl = detectedUrl.replace(':5173', ':3000');
+    }
+    setExternalUrl(detectedUrl);
+  };
+
+  const isLocalhost = externalUrl.includes('localhost') || externalUrl.includes('127.0.0.1');
+  const isHttp = externalUrl.startsWith('http://') && !isLocalhost;
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5" />
+            External Access
+          </CardTitle>
+          <CardDescription>
+            Configure how external devices (like mobile apps) connect to your server
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="externalUrl">External URL</Label>
+            <div className="flex gap-2">
+              <Input
+                id="externalUrl"
+                placeholder="https://tracearr.example.com"
+                value={externalUrl}
+                onChange={(e) => setExternalUrl(e.target.value)}
+                onBlur={handleSaveExternalUrl}
+              />
+              <Button variant="outline" onClick={handleDetectUrl}>
+                Detect
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The URL that external devices should use to reach this server. Used for QR codes and mobile app pairing.
+            </p>
+            {isLocalhost && (
+              <div className="flex items-start gap-2 rounded-lg bg-yellow-500/10 p-3 text-sm text-yellow-600">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  Localhost URLs only work when your phone is on the same machine.
+                  Use your local IP (e.g., http://192.168.1.x:3000) for LAN access,
+                  or set up a domain for remote access.
+                </span>
+              </div>
+            )}
+            {isHttp && (
+              <div className="flex items-start gap-2 rounded-lg bg-yellow-500/10 p-3 text-sm text-yellow-600">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  iOS requires HTTPS for non-local connections. HTTP will work on local networks
+                  but may fail for Tailscale or remote access. Consider using HTTPS with a reverse proxy.
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="basePath">Base Path</Label>
+            <Input
+              id="basePath"
+              placeholder="/tracearr"
+              value={basePath}
+              onChange={(e) => setBasePath(e.target.value)}
+              onBlur={handleSaveBasePath}
+            />
+            <p className="text-xs text-muted-foreground">
+              Only needed if running behind a reverse proxy with a path prefix (e.g., example.com/tracearr).
+              Leave empty for root-level deployments.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Reverse Proxy</CardTitle>
+          <CardDescription>
+            Settings for deployments behind nginx, Caddy, Traefik, or Cloudflare Tunnel
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="text-base">Trust Proxy Headers</Label>
+              <p className="text-sm text-muted-foreground">
+                Trust X-Forwarded-For and X-Forwarded-Proto headers from your reverse proxy
+              </p>
+            </div>
+            <Switch
+              checked={settings?.trustProxy ?? false}
+              onCheckedChange={handleToggleTrustProxy}
+            />
+          </div>
+
+          <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+            <p className="text-sm text-muted-foreground">
+              <strong>When to enable:</strong> If you're running Tracearr behind a reverse proxy
+              (nginx, Caddy, Traefik, Cloudflare Tunnel), enable this so the server knows the
+              real client IP and protocol.
+            </p>
+            {settings?.trustProxy && (
+              <p className="text-sm text-yellow-600">
+                <strong>Note:</strong> After changing this setting, you need to set the
+                TRUST_PROXY=true environment variable and restart the server for it to take effect.
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Connection Scenarios</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 text-sm">
+            <div className="flex gap-3">
+              <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+              <div>
+                <strong>Local network (LAN)</strong>
+                <p className="text-muted-foreground">http://192.168.1.x:3000 - Works on iOS with local network permissions</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+              <div>
+                <strong>Reverse proxy with HTTPS</strong>
+                <p className="text-muted-foreground">https://tracearr.example.com - Full support, recommended for remote access</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+              <div>
+                <strong>Cloudflare Tunnel</strong>
+                <p className="text-muted-foreground">https://tracearr.example.com - Full support, no port forwarding needed</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
+              <div>
+                <strong>Tailscale (HTTP)</strong>
+                <p className="text-muted-foreground">http://device.tailnet.ts.net - May require HTTPS for iOS</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <XCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+              <div>
+                <strong>Self-signed certificates</strong>
+                <p className="text-muted-foreground">https://192.168.1.x - iOS rejects self-signed certs by default</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function MobileSettings() {
   const { data: config, isLoading } = useMobileConfig();
+  const { data: settings } = useSettings();
   const enableMobile = useEnableMobile();
   const disableMobile = useDisableMobile();
   const rotateMobileToken = useRotateMobileToken();
@@ -544,17 +752,24 @@ function MobileSettings() {
     }
   };
 
-  const getQRData = (): string => {
-    if (!config?.token) return '';
-    // In dev, Vite runs on :5173 but mobile app needs the backend on :3000
-    // In production, both are served from the same origin
+  const getServerUrl = (): string => {
+    // Prefer configured external URL if set
+    if (settings?.externalUrl) {
+      return settings.externalUrl;
+    }
+    // Fallback: derive from current browser location
     let serverUrl = window.location.origin;
     if (import.meta.env.DEV) {
-      // Replace Vite's port with backend port for dev
+      // In dev, Vite runs on :5173 but mobile app needs the backend on :3000
       serverUrl = serverUrl.replace(':5173', ':3000');
     }
+    return serverUrl;
+  };
+
+  const getQRData = (): string => {
+    if (!config?.token) return '';
     const payload: MobileQRPayload = {
-      url: serverUrl,
+      url: getServerUrl(),
       token: config.token,
       name: config.serverName,
     };
@@ -652,6 +867,22 @@ function MobileSettings() {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Keep this token secure. Anyone with this token can access your server.
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Server URL in QR:</strong>{' '}
+                      <code className="rounded bg-background px-1">{getServerUrl()}</code>
+                      {!settings?.externalUrl && (
+                        <span className="block mt-1">
+                          Configure an External URL in{' '}
+                          <a href="/settings/network" className="text-primary hover:underline">
+                            Network settings
+                          </a>{' '}
+                          for remote access.
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -1166,6 +1397,7 @@ export function Settings() {
       <Routes>
         <Route index element={<GeneralSettings />} />
         <Route path="servers" element={<ServerSettings />} />
+        <Route path="network" element={<NetworkSettings />} />
         <Route path="notifications" element={<NotificationSettings />} />
         <Route path="access" element={<AccessSettings />} />
         <Route path="mobile" element={<MobileSettings />} />
