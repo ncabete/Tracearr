@@ -10,7 +10,7 @@
 import { eq, and, desc, isNull, gte } from 'drizzle-orm';
 import { POLLING_INTERVALS, TIME_MS, type ActiveSession, type SessionState, type Rule } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { servers, users, sessions } from '../../db/schema.js';
+import { servers, serverUsers, sessions, users } from '../../db/schema.js';
 import { createMediaServerClient } from '../../services/mediaServer/index.js';
 import { geoipService, type GeoLocation } from '../../services/geoip.js';
 import { ruleEngine } from '../../services/rules.js';
@@ -74,71 +74,83 @@ async function processServerSessions(
     const mediaSessions = await client.getSessions();
     const processedSessions = mediaSessions.map((s) => mapMediaSession(s, server.type));
 
-    // OPTIMIZATION: Pre-load all users for this server to avoid N+1 queries
-    const serverUsers = await db
+    // OPTIMIZATION: Pre-load all server users for this server to avoid N+1 queries
+    const serverUsersList = await db
       .select()
-      .from(users)
-      .where(eq(users.serverId, server.id));
+      .from(serverUsers)
+      .where(eq(serverUsers.serverId, server.id));
 
-    // Build user caches: externalId -> user and id -> user
-    const userByExternalId = new Map<string, typeof serverUsers[0]>();
-    const userById = new Map<string, typeof serverUsers[0]>();
-    for (const user of serverUsers) {
-      if (user.externalId) {
-        userByExternalId.set(user.externalId, user);
+    // Build server user caches: externalId -> serverUser and id -> serverUser
+    const serverUserByExternalId = new Map<string, typeof serverUsersList[0]>();
+    const serverUserById = new Map<string, typeof serverUsersList[0]>();
+    for (const serverUser of serverUsersList) {
+      if (serverUser.externalId) {
+        serverUserByExternalId.set(serverUser.externalId, serverUser);
       }
-      userById.set(user.id, user);
+      serverUserById.set(serverUser.id, serverUser);
     }
 
-    // Track users that need to be created and their session indices
-    const usersToCreate: { externalId: string; username: string; thumbUrl: string | null; sessionIndex: number }[] = [];
+    // Track server users that need to be created and their session indices
+    const serverUsersToCreate: { externalId: string; username: string; thumbUrl: string | null; sessionIndex: number }[] = [];
 
-    // First pass: identify users and resolve from cache or mark for creation
-    const sessionUserIds: (string | null)[] = [];
+    // First pass: identify server users and resolve from cache or mark for creation
+    const sessionServerUserIds: (string | null)[] = [];
 
     for (let i = 0; i < processedSessions.length; i++) {
       const processed = processedSessions[i]!;
-      const existingUser = userByExternalId.get(processed.externalUserId);
+      const existingServerUser = serverUserByExternalId.get(processed.externalUserId);
 
-      if (existingUser) {
-        // Check if user data needs update
+      if (existingServerUser) {
+        // Check if server user data needs update
         const needsUpdate =
-          existingUser.username !== processed.username ||
-          (processed.userThumb && existingUser.thumbUrl !== processed.userThumb);
+          existingServerUser.username !== processed.username ||
+          (processed.userThumb && existingServerUser.thumbUrl !== processed.userThumb);
 
         if (needsUpdate) {
           await db
-            .update(users)
+            .update(serverUsers)
             .set({
               username: processed.username,
-              thumbUrl: processed.userThumb || existingUser.thumbUrl,
+              thumbUrl: processed.userThumb || existingServerUser.thumbUrl,
               updatedAt: new Date(),
             })
-            .where(eq(users.id, existingUser.id));
+            .where(eq(serverUsers.id, existingServerUser.id));
 
           // Update cache
-          existingUser.username = processed.username;
-          if (processed.userThumb) existingUser.thumbUrl = processed.userThumb;
+          existingServerUser.username = processed.username;
+          if (processed.userThumb) existingServerUser.thumbUrl = processed.userThumb;
         }
 
-        sessionUserIds.push(existingUser.id);
+        sessionServerUserIds.push(existingServerUser.id);
       } else {
-        // Need to create user - mark for batch creation
-        usersToCreate.push({
+        // Need to create server user - mark for batch creation
+        serverUsersToCreate.push({
           externalId: processed.externalUserId,
           username: processed.username,
           thumbUrl: processed.userThumb || null,
           sessionIndex: i,
         });
-        sessionUserIds.push(null); // Will be filled after creation
+        sessionServerUserIds.push(null); // Will be filled after creation
       }
     }
 
-    // Batch create new users
-    if (usersToCreate.length > 0) {
-      const newUsers = await db
+    // Batch create new server users (and their identity users)
+    if (serverUsersToCreate.length > 0) {
+      // First, create identity users for each new server user
+      const newIdentityUsers = await db
         .insert(users)
-        .values(usersToCreate.map(u => ({
+        .values(serverUsersToCreate.map(u => ({
+          username: u.username, // Login identifier
+          name: u.username, // Use username as initial display name
+          thumbnail: u.thumbUrl,
+        })))
+        .returning();
+
+      // Then create server users linked to the identity users
+      const newServerUsers = await db
+        .insert(serverUsers)
+        .values(serverUsersToCreate.map((u, idx) => ({
+          userId: newIdentityUsers[idx]!.id,
           serverId: server.id,
           externalId: u.externalId,
           username: u.username,
@@ -146,32 +158,32 @@ async function processServerSessions(
         })))
         .returning();
 
-      // Update sessionUserIds with newly created user IDs
-      for (let i = 0; i < usersToCreate.length; i++) {
-        const userToCreate = usersToCreate[i]!;
-        const newUser = newUsers[i];
-        if (newUser) {
-          sessionUserIds[userToCreate.sessionIndex] = newUser.id;
-          userById.set(newUser.id, newUser);
-          userByExternalId.set(userToCreate.externalId, newUser);
+      // Update sessionServerUserIds with newly created server user IDs
+      for (let i = 0; i < serverUsersToCreate.length; i++) {
+        const serverUserToCreate = serverUsersToCreate[i]!;
+        const newServerUser = newServerUsers[i];
+        if (newServerUser) {
+          sessionServerUserIds[serverUserToCreate.sessionIndex] = newServerUser.id;
+          serverUserById.set(newServerUser.id, newServerUser);
+          serverUserByExternalId.set(serverUserToCreate.externalId, newServerUser);
         }
       }
     }
 
     // OPTIMIZATION: Batch load recent sessions for rule evaluation
-    // Only load for users with new sessions (not cached)
-    const usersWithNewSessions = new Set<string>();
+    // Only load for server users with new sessions (not cached)
+    const serverUsersWithNewSessions = new Set<string>();
     for (let i = 0; i < processedSessions.length; i++) {
       const processed = processedSessions[i]!;
       const sessionKey = `${server.id}:${processed.sessionKey}`;
       const isNew = !cachedSessionKeys.has(sessionKey);
-      const userId = sessionUserIds[i];
-      if (isNew && userId) {
-        usersWithNewSessions.add(userId);
+      const serverUserId = sessionServerUserIds[i];
+      if (isNew && serverUserId) {
+        serverUsersWithNewSessions.add(serverUserId);
       }
     }
 
-    const recentSessionsMap = await batchGetRecentUserSessions([...usersWithNewSessions]);
+    const recentSessionsMap = await batchGetRecentUserSessions([...serverUsersWithNewSessions]);
 
     // Process each session
     for (let i = 0; i < processedSessions.length; i++) {
@@ -179,17 +191,17 @@ async function processServerSessions(
       const sessionKey = `${server.id}:${processed.sessionKey}`;
       currentSessionKeys.add(sessionKey);
 
-      const userId = sessionUserIds[i];
-      if (!userId) {
-        console.error('Failed to get/create user for session');
+      const serverUserId = sessionServerUserIds[i];
+      if (!serverUserId) {
+        console.error('Failed to get/create server user for session');
         continue;
       }
 
-      // Get user details from cache
-      const userFromCache = userById.get(userId);
-      const userDetail = userFromCache
-        ? { id: userFromCache.id, username: userFromCache.username, thumbUrl: userFromCache.thumbUrl }
-        : { id: userId, username: 'Unknown', thumbUrl: null };
+      // Get server user details from cache
+      const serverUserFromCache = serverUserById.get(serverUserId);
+      const userDetail = serverUserFromCache
+        ? { id: serverUserFromCache.id, username: serverUserFromCache.username, thumbUrl: serverUserFromCache.thumbUrl }
+        : { id: serverUserId, username: 'Unknown', thumbUrl: null };
 
       // Get GeoIP location
       const geo: GeoLocation = geoipService.lookup(processed.ipAddress);
@@ -197,7 +209,7 @@ async function processServerSessions(
       const isNew = !cachedSessionKeys.has(sessionKey);
 
       if (isNew) {
-        // Check for session grouping - find recent unfinished session with same user+ratingKey
+        // Check for session grouping - find recent unfinished session with same serverUser+ratingKey
         let referenceId: string | null = null;
         if (processed.ratingKey) {
           const oneDayAgo = new Date(Date.now() - TIME_MS.DAY);
@@ -206,7 +218,7 @@ async function processServerSessions(
             .from(sessions)
             .where(
               and(
-                eq(sessions.userId, userId),
+                eq(sessions.serverUserId, serverUserId),
                 eq(sessions.ratingKey, processed.ratingKey),
                 gte(sessions.stoppedAt, oneDayAgo),
                 eq(sessions.watched, false) // Not fully watched
@@ -231,7 +243,7 @@ async function processServerSessions(
           .insert(sessions)
           .values({
             serverId: server.id,
-            userId,
+            serverUserId,
             sessionKey: processed.sessionKey,
             ratingKey: processed.ratingKey || null,
             state: processed.state,
@@ -279,7 +291,7 @@ async function processServerSessions(
         const activeSession: ActiveSession = {
           id: inserted.id,
           serverId: server.id,
-          userId,
+          serverUserId,
           sessionKey: processed.sessionKey,
           state: processed.state,
           mediaType: processed.mediaType,
@@ -324,11 +336,11 @@ async function processServerSessions(
         newSessions.push(activeSession);
 
         // Evaluate rules for new session (using batch-loaded recent sessions)
-        const recentSessions = recentSessionsMap.get(userId) ?? [];
+        const recentSessions = recentSessionsMap.get(serverUserId) ?? [];
         const session = {
           id: inserted.id,
           serverId: server.id,
-          userId,
+          serverUserId,
           sessionKey: processed.sessionKey,
           state: processed.state,
           mediaType: processed.mediaType,
@@ -371,11 +383,11 @@ async function processServerSessions(
         for (const result of ruleResults) {
           const matchingRule = activeRules.find(
             (r) =>
-              (r.userId === null || r.userId === userId) && result.violated
+              (r.serverUserId === null || r.serverUserId === serverUserId) && result.violated
           );
           if (matchingRule) {
             // createViolation handles both DB insert and WebSocket broadcast
-            await createViolation(matchingRule.id, userId, inserted.id, result, matchingRule, pubSubService);
+            await createViolation(matchingRule.id, serverUserId, inserted.id, result, matchingRule, pubSubService);
           }
         }
       } else {
@@ -436,7 +448,7 @@ async function processServerSessions(
         const activeSession: ActiveSession = {
           id: existingSession.id,
           serverId: server.id,
-          userId,
+          serverUserId,
           sessionKey: processed.sessionKey,
           state: newState,
           mediaType: processed.mediaType,
@@ -595,7 +607,7 @@ async function pollServers(): Promise<void> {
       // Update individual session cache
       for (const session of allNewSessions) {
         await cacheService.setSessionById(session.id, session);
-        await cacheService.addUserSession(session.userId, session.id);
+        await cacheService.addUserSession(session.serverUserId, session.id);
       }
 
       for (const session of allUpdatedSessions) {
@@ -615,7 +627,7 @@ async function pollServers(): Promise<void> {
           );
           if (stoppedSession) {
             await cacheService.deleteSessionById(stoppedSession.id);
-            await cacheService.removeUserSession(stoppedSession.userId, stoppedSession.id);
+            await cacheService.removeUserSession(stoppedSession.serverUserId, stoppedSession.id);
           }
         }
       }

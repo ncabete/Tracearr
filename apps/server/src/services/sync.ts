@@ -14,7 +14,7 @@ import {
   type MediaUser,
 } from './mediaServer/index.js';
 import { decrypt } from '../utils/crypto.js';
-import { upsertUserFromMediaServer } from './userService.js';
+import { syncUserFromMediaServer } from './userService.js';
 
 export interface SyncResult {
   usersAdded: number;
@@ -44,7 +44,7 @@ async function syncServerUsers(
 
   for (const mediaUser of mediaUsers) {
     try {
-      const result = await upsertUserFromMediaServer(serverId, mediaUser);
+      const result = await syncUserFromMediaServer(serverId, mediaUser);
       if (result.created) {
         added++;
       } else {

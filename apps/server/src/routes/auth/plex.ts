@@ -9,7 +9,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../../db/client.js';
-import { servers, users } from '../../db/schema.js';
+import { servers, users, serverUsers } from '../../db/schema.js';
 import { PlexClient } from '../../services/mediaServer/index.js';
 import { encrypt } from '../../utils/crypto.js';
 import {
@@ -18,7 +18,7 @@ import {
   PLEX_TEMP_TOKEN_PREFIX,
   PLEX_TEMP_TOKEN_TTL,
 } from './utils.js';
-import { getUserByPlexAccountId, getOwnerUser } from '../../services/userService.js';
+import { getUserByPlexAccountId, getOwnerUser, getUserById } from '../../services/userService.js';
 
 // Schemas
 const plexCheckPinSchema = z.object({
@@ -58,14 +58,16 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
       // Check if user exists by Plex account ID (global Plex.tv ID)
       let existingUser = await getUserByPlexAccountId(authResult.id);
 
-      // Fallback: Check by external_id (server-synced users may have Plex ID there)
+      // Fallback: Check by externalId in server_users (server-synced users may have Plex ID there)
       if (!existingUser) {
-        const fallbackUsers = await db
-          .select()
-          .from(users)
-          .where(eq(users.externalId, authResult.id))
+        const fallbackServerUsers = await db
+          .select({ userId: serverUsers.userId })
+          .from(serverUsers)
+          .where(eq(serverUsers.externalId, authResult.id))
           .limit(1);
-        existingUser = fallbackUsers[0] ?? null;
+        if (fallbackServerUsers[0]) {
+          existingUser = await getUserById(fallbackServerUsers[0].userId);
+        }
       }
 
       if (existingUser) {
@@ -77,7 +79,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
           .set({
             username: authResult.username,
             email: authResult.email,
-            thumbUrl: authResult.thumb,
+            thumbnail: authResult.thumb,
             plexAccountId: authResult.id, // Link the Plex account ID
             updatedAt: new Date(),
           })
@@ -87,7 +89,7 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
 
         return {
           authorized: true,
-          ...(await generateTokens(app, user.id, authResult.username, user.isOwner)),
+          ...(await generateTokens(app, user.id, authResult.username, user.role)),
         };
       }
 
@@ -136,14 +138,17 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // No servers - create account without server connection
+      // First user becomes owner, subsequent users are viewers
+      const role = isFirstUser ? 'owner' : 'viewer';
+
       const [newUser] = await db
         .insert(users)
         .values({
           username: authResult.username,
           email: authResult.email,
-          thumbUrl: authResult.thumb,
+          thumbnail: authResult.thumb,
           plexAccountId: authResult.id,
-          isOwner: isFirstUser,
+          role,
         })
         .returning();
 
@@ -154,11 +159,11 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
       // Clean up temp token
       await app.redis.del(`${PLEX_TEMP_TOKEN_PREFIX}${tempToken}`);
 
-      app.log.info({ userId: newUser.id, isOwner: isFirstUser }, 'New Plex user created (no servers)');
+      app.log.info({ userId: newUser.id, role }, 'New Plex user created (no servers)');
 
       return {
         authorized: true,
-        ...(await generateTokens(app, newUser.id, newUser.username, newUser.isOwner)),
+        ...(await generateTokens(app, newUser.id, newUser.username, newUser.role)),
       };
     } catch (error) {
       app.log.error({ error }, 'Plex check-pin failed');
@@ -232,16 +237,18 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
 
       const serverId = server[0]!.id;
 
-      // Create user with Plex account ID
+      // Create user identity (no serverId on users table)
+      // First user becomes owner, subsequent users are viewers
+      const role = isFirstUser ? 'owner' : 'viewer';
+
       const [newUser] = await db
         .insert(users)
         .values({
-          serverId,
           username: plexUsername,
           email: plexEmail,
-          thumbUrl: plexThumb,
+          thumbnail: plexThumb,
           plexAccountId: plexAccountId,
-          isOwner: isFirstUser,
+          role,
         })
         .returning();
 
@@ -249,9 +256,20 @@ export const plexRoutes: FastifyPluginAsync = async (app) => {
         return reply.internalServerError('Failed to create user');
       }
 
-      app.log.info({ userId: newUser.id, serverId, isOwner: isFirstUser }, 'New Plex user with server created');
+      // Create server_user linking the identity to this server
+      await db.insert(serverUsers).values({
+        userId: newUser.id,
+        serverId,
+        externalId: plexAccountId,
+        username: plexUsername,
+        email: plexEmail,
+        thumbUrl: plexThumb,
+        isServerAdmin: true, // They verified as admin
+      });
 
-      return generateTokens(app, newUser.id, newUser.username, newUser.isOwner);
+      app.log.info({ userId: newUser.id, serverId, role }, 'New Plex user with server created');
+
+      return generateTokens(app, newUser.id, newUser.username, newUser.role);
     } catch (error) {
       app.log.error({ error }, 'Plex connect failed');
       return reply.internalServerError('Failed to connect to Plex server');

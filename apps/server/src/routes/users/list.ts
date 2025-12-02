@@ -1,9 +1,12 @@
 /**
- * User List and CRUD Routes
+ * Server User List and CRUD Routes
  *
- * GET / - List all users with pagination
- * GET /:id - Get user details
- * PATCH /:id - Update user (trustScore, etc.)
+ * These routes manage server users (accounts on Plex/Jellyfin/Emby servers),
+ * not the identity users. Server users have per-server trust scores and session counts.
+ *
+ * GET / - List all server users with pagination
+ * GET /:id - Get server user details
+ * PATCH /:id - Update server user (trustScore, etc.)
  */
 
 import type { FastifyPluginAsync } from 'fastify';
@@ -14,11 +17,11 @@ import {
   paginationSchema,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { users, sessions, servers } from '../../db/schema.js';
+import { serverUsers, sessions, servers, users } from '../../db/schema.js';
 
 export const listRoutes: FastifyPluginAsync = async (app) => {
   /**
-   * GET / - List all users with pagination
+   * GET / - List all server users with pagination
    */
   app.get(
     '/',
@@ -33,43 +36,49 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       const authUser = request.user;
       const offset = (page - 1) * pageSize;
 
-      // Get users from servers the authenticated user has access to
+      // Get server users from servers the authenticated user has access to
       const conditions = [];
       if (authUser.serverIds.length > 0) {
-        conditions.push(eq(users.serverId, authUser.serverIds[0] as string));
+        conditions.push(eq(serverUsers.serverId, authUser.serverIds[0] as string));
       }
 
-      const userList = await db
+      const serverUserList = await db
         .select({
-          id: users.id,
-          serverId: users.serverId,
+          id: serverUsers.id,
+          serverId: serverUsers.serverId,
           serverName: servers.name,
-          externalId: users.externalId,
-          username: users.username,
-          email: users.email,
-          thumbUrl: users.thumbUrl,
-          isOwner: users.isOwner,
-          trustScore: users.trustScore,
-          createdAt: users.createdAt,
-          updatedAt: users.updatedAt,
+          userId: serverUsers.userId,
+          externalId: serverUsers.externalId,
+          username: serverUsers.username,
+          email: serverUsers.email,
+          thumbUrl: serverUsers.thumbUrl,
+          isServerAdmin: serverUsers.isServerAdmin,
+          trustScore: serverUsers.trustScore,
+          sessionCount: serverUsers.sessionCount,
+          createdAt: serverUsers.createdAt,
+          updatedAt: serverUsers.updatedAt,
+          // Include identity info
+          identityName: users.name,
+          role: users.role,
         })
-        .from(users)
-        .innerJoin(servers, eq(users.serverId, servers.id))
+        .from(serverUsers)
+        .innerJoin(servers, eq(serverUsers.serverId, servers.id))
+        .innerJoin(users, eq(serverUsers.userId, users.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .orderBy(users.username)
+        .orderBy(serverUsers.username)
         .limit(pageSize)
         .offset(offset);
 
       // Get total count
       const countResult = await db
         .select({ count: sql<number>`count(*)::int` })
-        .from(users)
+        .from(serverUsers)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
       const total = countResult[0]?.count ?? 0;
 
       return {
-        data: userList,
+        data: serverUserList,
         page,
         pageSize,
         total,
@@ -79,7 +88,7 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
   );
 
   /**
-   * GET /:id - Get user details
+   * GET /:id - Get server user details
    */
   app.get(
     '/:id',
@@ -93,48 +102,54 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
       const { id } = params.data;
       const authUser = request.user;
 
-      const userRows = await db
+      const serverUserRows = await db
         .select({
-          id: users.id,
-          serverId: users.serverId,
+          id: serverUsers.id,
+          serverId: serverUsers.serverId,
           serverName: servers.name,
-          externalId: users.externalId,
-          username: users.username,
-          email: users.email,
-          thumbUrl: users.thumbUrl,
-          isOwner: users.isOwner,
-          trustScore: users.trustScore,
-          createdAt: users.createdAt,
-          updatedAt: users.updatedAt,
+          userId: serverUsers.userId,
+          externalId: serverUsers.externalId,
+          username: serverUsers.username,
+          email: serverUsers.email,
+          thumbUrl: serverUsers.thumbUrl,
+          isServerAdmin: serverUsers.isServerAdmin,
+          trustScore: serverUsers.trustScore,
+          sessionCount: serverUsers.sessionCount,
+          createdAt: serverUsers.createdAt,
+          updatedAt: serverUsers.updatedAt,
+          // Include identity info
+          identityName: users.name,
+          role: users.role,
         })
-        .from(users)
-        .innerJoin(servers, eq(users.serverId, servers.id))
-        .where(eq(users.id, id))
+        .from(serverUsers)
+        .innerJoin(servers, eq(serverUsers.serverId, servers.id))
+        .innerJoin(users, eq(serverUsers.userId, users.id))
+        .where(eq(serverUsers.id, id))
         .limit(1);
 
-      const user = userRows[0];
-      if (!user) {
+      const serverUser = serverUserRows[0];
+      if (!serverUser) {
         return reply.notFound('User not found');
       }
 
       // Verify access
-      if (user.serverId && !authUser.serverIds.includes(user.serverId)) {
+      if (!authUser.serverIds.includes(serverUser.serverId)) {
         return reply.forbidden('You do not have access to this user');
       }
 
-      // Get session stats for this user
+      // Get session stats for this server user
       const statsResult = await db
         .select({
           totalSessions: sql<number>`count(*)::int`,
           totalWatchTime: sql<number>`coalesce(sum(duration_ms), 0)::bigint`,
         })
         .from(sessions)
-        .where(eq(sessions.userId, id));
+        .where(eq(sessions.serverUserId, id));
 
       const stats = statsResult[0];
 
       return {
-        ...user,
+        ...serverUser,
         stats: {
           totalSessions: stats?.totalSessions ?? 0,
           totalWatchTime: Number(stats?.totalWatchTime ?? 0),
@@ -144,7 +159,7 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
   );
 
   /**
-   * PATCH /:id - Update user (trustScore, etc.)
+   * PATCH /:id - Update server user (trustScore, etc.)
    */
   app.patch(
     '/:id',
@@ -168,20 +183,20 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
         return reply.forbidden('Only server owners can update users');
       }
 
-      // Get existing user
-      const userRows = await db
+      // Get existing server user
+      const serverUserRows = await db
         .select()
-        .from(users)
-        .where(eq(users.id, id))
+        .from(serverUsers)
+        .where(eq(serverUsers.id, id))
         .limit(1);
 
-      const user = userRows[0];
-      if (!user) {
+      const serverUser = serverUserRows[0];
+      if (!serverUser) {
         return reply.notFound('User not found');
       }
 
       // Verify access
-      if (user.serverId && !authUser.serverIds.includes(user.serverId)) {
+      if (!authUser.serverIds.includes(serverUser.serverId)) {
         return reply.forbidden('You do not have access to this user');
       }
 
@@ -197,30 +212,32 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
         updateData.trustScore = body.data.trustScore;
       }
 
-      // Update user
+      // Update server user
       const updated = await db
-        .update(users)
+        .update(serverUsers)
         .set(updateData)
-        .where(eq(users.id, id))
+        .where(eq(serverUsers.id, id))
         .returning({
-          id: users.id,
-          serverId: users.serverId,
-          externalId: users.externalId,
-          username: users.username,
-          email: users.email,
-          thumbUrl: users.thumbUrl,
-          isOwner: users.isOwner,
-          trustScore: users.trustScore,
-          createdAt: users.createdAt,
-          updatedAt: users.updatedAt,
+          id: serverUsers.id,
+          serverId: serverUsers.serverId,
+          userId: serverUsers.userId,
+          externalId: serverUsers.externalId,
+          username: serverUsers.username,
+          email: serverUsers.email,
+          thumbUrl: serverUsers.thumbUrl,
+          isServerAdmin: serverUsers.isServerAdmin,
+          trustScore: serverUsers.trustScore,
+          sessionCount: serverUsers.sessionCount,
+          createdAt: serverUsers.createdAt,
+          updatedAt: serverUsers.updatedAt,
         });
 
-      const updatedUser = updated[0];
-      if (!updatedUser) {
+      const updatedServerUser = updated[0];
+      if (!updatedServerUser) {
         return reply.internalServerError('Failed to update user');
       }
 
-      return updatedUser;
+      return updatedServerUser;
     }
   );
 };

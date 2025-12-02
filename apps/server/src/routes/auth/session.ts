@@ -8,7 +8,7 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { JWT_CONFIG, type AuthUser } from '@tracearr/shared';
+import { JWT_CONFIG, canLogin, type AuthUser } from '@tracearr/shared';
 import {
   generateRefreshToken,
   hashRefreshToken,
@@ -50,13 +50,20 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       return reply.unauthorized('User not found');
     }
 
+    // Check if user can still log in
+    if (!canLogin(user.role)) {
+      await app.redis.del(`${REFRESH_TOKEN_PREFIX}${refreshTokenHash}`);
+      return reply.unauthorized('Account is not active');
+    }
+
     // Get fresh server IDs (in case servers were added/removed)
-    const serverIds = user.isOwner ? await getAllServerIds() : [];
+    // TODO: Admins should get servers where they're isServerAdmin=true
+    const serverIds = user.role === 'owner' ? await getAllServerIds() : [];
 
     const accessPayload: AuthUser = {
       userId,
       username: user.username,
-      role: user.isOwner ? 'owner' : 'guest',
+      role: user.role,
       serverIds,
     };
 
@@ -107,15 +114,16 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Get fresh server IDs
-    const serverIds = user.isOwner ? await getAllServerIds() : [];
+    // TODO: Admins should get servers where they're isServerAdmin=true
+    const serverIds = user.role === 'owner' ? await getAllServerIds() : [];
 
     return {
       userId: user.id,
       username: user.username,
       email: user.email,
-      thumbUrl: user.thumbUrl,
-      role: user.isOwner ? 'owner' : 'guest',
-      trustScore: user.trustScore,
+      thumbnail: user.thumbnail,
+      role: user.role,
+      aggregateTrustScore: user.aggregateTrustScore,
       serverIds,
       hasPassword: !!user.passwordHash,
       hasPlexLinked: !!user.plexAccountId,

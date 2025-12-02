@@ -58,7 +58,9 @@ export const localRoutes: FastifyPluginAsync = async (app) => {
     const isFirstUser = !owner;
 
     // Create user with password hash
+    // First user becomes owner, subsequent users are viewers
     const passwordHashValue = await hashPassword(password);
+    const role = isFirstUser ? 'owner' : 'viewer';
 
     const [newUser] = await db
       .insert(users)
@@ -66,8 +68,7 @@ export const localRoutes: FastifyPluginAsync = async (app) => {
         username,
         email: email ?? null,
         passwordHash: passwordHashValue,
-        isOwner: isFirstUser, // First user is always owner
-        // serverId and externalId are null for local accounts
+        role,
       })
       .returning();
 
@@ -75,9 +76,9 @@ export const localRoutes: FastifyPluginAsync = async (app) => {
       return reply.internalServerError('Failed to create user');
     }
 
-    app.log.info({ userId: newUser.id, isOwner: isFirstUser }, 'Local account created');
+    app.log.info({ userId: newUser.id, role }, 'Local account created');
 
-    return generateTokens(app, newUser.id, newUser.username, newUser.isOwner);
+    return generateTokens(app, newUser.id, newUser.username, newUser.role);
   });
 
   /**
@@ -114,7 +115,7 @@ export const localRoutes: FastifyPluginAsync = async (app) => {
 
       app.log.info({ userId: user.id }, 'Local login successful');
 
-      return generateTokens(app, user.id, user.username, user.isOwner);
+      return generateTokens(app, user.id, user.username, user.role);
     }
 
     // Plex OAuth - initiate flow

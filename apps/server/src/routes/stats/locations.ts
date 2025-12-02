@@ -28,7 +28,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest('Invalid query parameters');
       }
 
-      const { days, userId, serverId, mediaType } = query.data;
+      const { days, serverUserId, serverId, mediaType } = query.data;
       const startDate = new Date(Date.now() - days * TIME_MS.DAY);
 
       // Build WHERE conditions dynamically (all qualified with 's.' for sessions table)
@@ -38,8 +38,8 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
         sql`s.geo_lon IS NOT NULL`,
       ];
 
-      if (userId) {
-        conditions.push(sql`s.user_id = ${userId}`);
+      if (serverUserId) {
+        conditions.push(sql`s.server_user_id = ${serverUserId}`);
       }
       if (serverId) {
         conditions.push(sql`s.server_id = ${serverId}`);
@@ -63,10 +63,10 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
           MAX(s.started_at) as last_activity,
           MIN(s.started_at) as first_activity,
           COUNT(DISTINCT COALESCE(s.device_id, s.player_name))::int as device_count,
-          JSON_AGG(DISTINCT jsonb_build_object('id', u.id, 'username', u.username, 'thumbUrl', u.thumb_url))
-            FILTER (WHERE u.id IS NOT NULL) as user_info
+          JSON_AGG(DISTINCT jsonb_build_object('id', su.id, 'username', su.username, 'thumbUrl', su.thumb_url))
+            FILTER (WHERE su.id IS NOT NULL) as user_info
         FROM sessions s
-        LEFT JOIN users u ON s.user_id = u.id
+        LEFT JOIN server_users su ON s.server_user_id = su.id
         ${whereClause}
         GROUP BY s.geo_city, s.geo_region, s.geo_country, s.geo_lat, s.geo_lon
         ORDER BY count DESC
@@ -95,7 +95,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
         firstActivity: row.first_activity,
         deviceCount: row.device_count,
         // Only include users array if NOT filtering by a specific user
-        users: userId ? undefined : (row.user_info ?? []).slice(0, 5),
+        users: serverUserId ? undefined : (row.user_info ?? []).slice(0, 5),
       }));
 
       // Calculate summary stats for the overlay card
@@ -118,17 +118,17 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
       if (serverId) userConditions.push(sql`s.server_id = ${serverId}`);
       if (mediaType) userConditions.push(sql`s.media_type = ${mediaType}`);
       const usersResult = await db.execute(sql`
-        SELECT DISTINCT u.id, u.username
+        SELECT DISTINCT su.id, su.username
         FROM sessions s
-        JOIN users u ON s.user_id = u.id
+        JOIN server_users su ON s.server_user_id = su.id
         WHERE ${sql.join(userConditions, sql` AND `)}
-        ORDER BY u.username
+        ORDER BY su.username
       `);
       const availableUsers = (usersResult.rows as { id: string; username: string }[]);
 
       // Available servers (apply user + mediaType filters, not server filter)
       const serverConditions = [...baseConditions];
-      if (userId) serverConditions.push(sql`s.user_id = ${userId}`);
+      if (serverUserId) serverConditions.push(sql`s.server_user_id = ${serverUserId}`);
       if (mediaType) serverConditions.push(sql`s.media_type = ${mediaType}`);
       const serversResult = await db.execute(sql`
         SELECT DISTINCT sv.id, sv.name
@@ -141,7 +141,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
 
       // Available media types (apply user + server filters, not mediaType filter)
       const mediaConditions = [...baseConditions];
-      if (userId) mediaConditions.push(sql`s.user_id = ${userId}`);
+      if (serverUserId) mediaConditions.push(sql`s.server_user_id = ${serverUserId}`);
       if (serverId) mediaConditions.push(sql`s.server_id = ${serverId}`);
       const mediaResult = await db.execute(sql`
         SELECT DISTINCT s.media_type

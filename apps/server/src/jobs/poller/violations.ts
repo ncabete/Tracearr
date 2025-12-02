@@ -9,7 +9,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { Rule, ViolationSeverity, ViolationWithDetails } from '@tracearr/shared';
 import { WS_EVENTS } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { users, violations } from '../../db/schema.js';
+import { serverUsers, violations } from '../../db/schema.js';
 import type { RuleEvaluationResult } from '../../services/rules.js';
 import type { PubSubService } from '../../services/cache.js';
 
@@ -37,25 +37,25 @@ export function getTrustScorePenalty(severity: ViolationSeverity): number {
 // ============================================================================
 
 /**
- * Check if a rule applies to a specific user.
+ * Check if a rule applies to a specific server user.
  *
- * Global rules (userId=null) apply to all users.
- * User-specific rules only apply to that user.
+ * Global rules (serverUserId=null) apply to all server users.
+ * User-specific rules only apply to that server user.
  *
  * @param rule - Rule to check
- * @param userId - User ID to check against
- * @returns true if the rule applies to this user
+ * @param serverUserId - Server user ID to check against
+ * @returns true if the rule applies to this server user
  *
  * @example
- * doesRuleApplyToUser({ userId: null }, 'user-123');       // true (global rule)
- * doesRuleApplyToUser({ userId: 'user-123' }, 'user-123'); // true (user-specific)
- * doesRuleApplyToUser({ userId: 'user-456' }, 'user-123'); // false (different user)
+ * doesRuleApplyToUser({ serverUserId: null }, 'su-123');       // true (global rule)
+ * doesRuleApplyToUser({ serverUserId: 'su-123' }, 'su-123'); // true (user-specific)
+ * doesRuleApplyToUser({ serverUserId: 'su-456' }, 'su-123'); // false (different user)
  */
 export function doesRuleApplyToUser(
-  rule: { userId: string | null },
-  userId: string
+  rule: { serverUserId: string | null },
+  serverUserId: string
 ): boolean {
-  return rule.userId === null || rule.userId === userId;
+  return rule.serverUserId === null || rule.serverUserId === serverUserId;
 }
 
 // ============================================================================
@@ -67,7 +67,7 @@ export function doesRuleApplyToUser(
  * Uses a transaction to ensure violation insert and trust score update are atomic.
  *
  * @param ruleId - ID of the rule that was violated
- * @param userId - ID of the user who violated the rule
+ * @param serverUserId - ID of the server user who violated the rule
  * @param sessionId - ID of the session where violation occurred
  * @param result - Rule evaluation result with severity and data
  * @param rule - Full rule object for broadcast details
@@ -76,7 +76,7 @@ export function doesRuleApplyToUser(
  * @example
  * await createViolation(
  *   'rule-123',
- *   'user-456',
+ *   'server-user-456',
  *   'session-789',
  *   { violated: true, severity: 'warning', data: { reason: 'Multiple streams' } },
  *   rule,
@@ -85,7 +85,7 @@ export function doesRuleApplyToUser(
  */
 export async function createViolation(
   ruleId: string,
-  userId: string,
+  serverUserId: string,
   sessionId: string,
   result: RuleEvaluationResult,
   rule: Rule,
@@ -100,51 +100,51 @@ export async function createViolation(
       .insert(violations)
       .values({
         ruleId,
-        userId,
+        serverUserId,
         sessionId,
         severity: result.severity,
         data: result.data,
       })
       .returning();
 
-    // Decrease user trust score based on severity (atomic within transaction)
+    // Decrease server user trust score based on severity (atomic within transaction)
     await tx
-      .update(users)
+      .update(serverUsers)
       .set({
-        trustScore: sql`GREATEST(0, ${users.trustScore} - ${trustPenalty})`,
+        trustScore: sql`GREATEST(0, ${serverUsers.trustScore} - ${trustPenalty})`,
         updatedAt: new Date(),
       })
-      .where(eq(users.id, userId));
+      .where(eq(serverUsers.id, serverUserId));
 
     return violation;
   });
 
-  // Get user details for the violation broadcast (outside transaction - read only)
-  const [user] = await db
+  // Get server user details for the violation broadcast (outside transaction - read only)
+  const [serverUser] = await db
     .select({
-      id: users.id,
-      username: users.username,
-      thumbUrl: users.thumbUrl,
+      id: serverUsers.id,
+      username: serverUsers.username,
+      thumbUrl: serverUsers.thumbUrl,
     })
-    .from(users)
-    .where(eq(users.id, userId))
+    .from(serverUsers)
+    .where(eq(serverUsers.id, serverUserId))
     .limit(1);
 
   // Publish violation event for WebSocket broadcast
-  if (pubSubService && created && user) {
+  if (pubSubService && created && serverUser) {
     const violationWithDetails: ViolationWithDetails = {
       id: created.id,
       ruleId: created.ruleId,
-      userId: created.userId,
+      serverUserId: created.serverUserId,
       sessionId: created.sessionId,
       severity: created.severity,
       data: created.data,
       acknowledgedAt: created.acknowledgedAt,
       createdAt: created.createdAt,
       user: {
-        id: user.id,
-        username: user.username,
-        thumbUrl: user.thumbUrl,
+        id: serverUser.id,
+        username: serverUser.username,
+        thumbUrl: serverUser.thumbUrl,
       },
       rule: {
         id: rule.id,
@@ -154,6 +154,6 @@ export async function createViolation(
     };
 
     await pubSubService.publish(WS_EVENTS.VIOLATION_NEW, violationWithDetails);
-    console.log(`[Poller] Violation broadcast: ${rule.name} for user ${user.username}`);
+    console.log(`[Poller] Violation broadcast: ${rule.name} for user ${serverUser.username}`);
   }
 }

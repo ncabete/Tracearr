@@ -8,7 +8,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { eq, desc, sql } from 'drizzle-orm';
 import { userIdParamSchema, paginationSchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { users, sessions, servers } from '../../db/schema.js';
+import { serverUsers, sessions, servers } from '../../db/schema.js';
 
 export const sessionsRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -33,19 +33,19 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       const authUser = request.user;
       const offset = (page - 1) * pageSize;
 
-      // Verify user exists and access
-      const userRows = await db
+      // Verify server user exists and access
+      const serverUserRows = await db
         .select()
-        .from(users)
-        .where(eq(users.id, id))
+        .from(serverUsers)
+        .where(eq(serverUsers.id, id))
         .limit(1);
 
-      const user = userRows[0];
-      if (!user) {
+      const serverUser = serverUserRows[0];
+      if (!serverUser) {
         return reply.notFound('User not found');
       }
 
-      if (user.serverId && !authUser.serverIds.includes(user.serverId)) {
+      if (!authUser.serverIds.includes(serverUser.serverId)) {
         return reply.forbidden('You do not have access to this user');
       }
 
@@ -78,7 +78,7 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
         })
         .from(sessions)
         .innerJoin(servers, eq(sessions.serverId, servers.id))
-        .where(eq(sessions.userId, id))
+        .where(eq(sessions.serverUserId, id))
         .orderBy(desc(sessions.startedAt))
         .limit(pageSize)
         .offset(offset);
@@ -87,7 +87,7 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       const countResult = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(sessions)
-        .where(eq(sessions.userId, id));
+        .where(eq(sessions.serverUserId, id));
 
       const total = countResult[0]?.count ?? 0;
 

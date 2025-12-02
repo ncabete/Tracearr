@@ -85,7 +85,7 @@ export const embyRoutes: FastifyPluginAsync = async (app) => {
         app.log.info({ userId: authUser.userId, serverId }, 'Emby server connected via API key');
 
         // Return updated tokens with new server access
-        return generateTokens(app, authUser.userId, authUser.username, true);
+        return generateTokens(app, authUser.userId, authUser.username, authUser.role);
       } catch (error) {
         app.log.error({ error }, 'Emby connect-api-key failed');
         return reply.internalServerError('Failed to connect Emby server');

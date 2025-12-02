@@ -16,50 +16,50 @@ import { mapSessionRow } from './sessionMapper.js';
 // ============================================================================
 
 /**
- * Batch load recent sessions for multiple users (eliminates N+1 in polling loop)
+ * Batch load recent sessions for multiple server users (eliminates N+1 in polling loop)
  *
- * This function fetches sessions from the last N hours for a batch of users
+ * This function fetches sessions from the last N hours for a batch of server users
  * in a single query, avoiding the performance penalty of querying per-user.
  *
- * @param userIds - Array of user IDs to load sessions for
+ * @param serverUserIds - Array of server user IDs to load sessions for
  * @param hours - Number of hours to look back (default: 24)
- * @returns Map of userId -> Session[] for each user
+ * @returns Map of serverUserId -> Session[] for each server user
  *
  * @example
- * const sessionMap = await batchGetRecentUserSessions(['user-1', 'user-2', 'user-3']);
- * const user1Sessions = sessionMap.get('user-1') ?? [];
+ * const sessionMap = await batchGetRecentUserSessions(['su-1', 'su-2', 'su-3']);
+ * const user1Sessions = sessionMap.get('su-1') ?? [];
  */
 export async function batchGetRecentUserSessions(
-  userIds: string[],
+  serverUserIds: string[],
   hours = 24
 ): Promise<Map<string, Session[]>> {
-  if (userIds.length === 0) return new Map();
+  if (serverUserIds.length === 0) return new Map();
 
   const since = new Date(Date.now() - hours * TIME_MS.HOUR);
   const result = new Map<string, Session[]>();
 
-  // Initialize empty arrays for all users
-  for (const userId of userIds) {
-    result.set(userId, []);
+  // Initialize empty arrays for all server users
+  for (const serverUserId of serverUserIds) {
+    result.set(serverUserId, []);
   }
 
-  // Single query to get recent sessions for all users using inArray
+  // Single query to get recent sessions for all server users using inArray
   const recentSessions = await db
     .select()
     .from(sessions)
     .where(and(
-      inArray(sessions.userId, userIds),
+      inArray(sessions.serverUserId, serverUserIds),
       gte(sessions.startedAt, since)
     ))
     .orderBy(desc(sessions.startedAt));
 
-  // Group by user (limit per user to prevent memory issues)
+  // Group by server user (limit per user to prevent memory issues)
   for (const s of recentSessions) {
-    const userSessions = result.get(s.userId) ?? [];
+    const userSessions = result.get(s.serverUserId) ?? [];
     if (userSessions.length < SESSION_LIMITS.MAX_RECENT_PER_USER) {
       userSessions.push(mapSessionRow(s));
     }
-    result.set(s.userId, userSessions);
+    result.set(s.serverUserId, userSessions);
   }
 
   return result;
@@ -86,7 +86,7 @@ export async function getActiveRules(): Promise<Rule[]> {
     name: r.name,
     type: r.type,
     params: r.params as unknown as RuleParams,
-    userId: r.userId,
+    serverUserId: r.serverUserId,
     isActive: r.isActive,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,

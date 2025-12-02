@@ -113,7 +113,7 @@ export function mapSessionRow(s: typeof sessions.$inferSelect): Session {
   return {
     id: s.id,
     serverId: s.serverId,
-    userId: s.userId,
+    serverUserId: s.serverUserId,
     sessionKey: s.sessionKey,
     state: s.state,
     mediaType: s.mediaType,

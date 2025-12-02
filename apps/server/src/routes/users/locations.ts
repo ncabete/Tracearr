@@ -8,7 +8,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { eq, desc, sql } from 'drizzle-orm';
 import { userIdParamSchema, type UserLocation } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { users, sessions } from '../../db/schema.js';
+import { serverUsers, sessions } from '../../db/schema.js';
 
 export const locationsRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -26,19 +26,19 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
       const { id } = params.data;
       const authUser = request.user;
 
-      // Verify user exists and access
-      const userRows = await db
+      // Verify server user exists and access
+      const serverUserRows = await db
         .select()
-        .from(users)
-        .where(eq(users.id, id))
+        .from(serverUsers)
+        .where(eq(serverUsers.id, id))
         .limit(1);
 
-      const user = userRows[0];
-      if (!user) {
+      const serverUser = serverUserRows[0];
+      if (!serverUser) {
         return reply.notFound('User not found');
       }
 
-      if (user.serverId && !authUser.serverIds.includes(user.serverId)) {
+      if (!authUser.serverIds.includes(serverUser.serverId)) {
         return reply.forbidden('You do not have access to this user');
       }
 
@@ -55,7 +55,7 @@ export const locationsRoutes: FastifyPluginAsync = async (app) => {
           ipAddresses: sql<string[]>`array_agg(distinct ${sessions.ipAddress})`,
         })
         .from(sessions)
-        .where(eq(sessions.userId, id))
+        .where(eq(sessions.serverUserId, id))
         .groupBy(
           sessions.geoCity,
           sessions.geoRegion,

@@ -85,7 +85,7 @@ export const jellyfinRoutes: FastifyPluginAsync = async (app) => {
         app.log.info({ userId: authUser.userId, serverId }, 'Jellyfin server connected via API key');
 
         // Return updated tokens with new server access
-        return generateTokens(app, authUser.userId, authUser.username, true);
+        return generateTokens(app, authUser.userId, authUser.username, authUser.role);
       } catch (error) {
         app.log.error({ error }, 'Jellyfin connect-api-key failed');
         return reply.internalServerError('Failed to connect Jellyfin server');

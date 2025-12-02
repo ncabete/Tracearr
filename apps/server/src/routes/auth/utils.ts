@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes } from 'crypto';
 import type { FastifyInstance } from 'fastify';
-import { JWT_CONFIG, type AuthUser } from '@tracearr/shared';
+import { JWT_CONFIG, type AuthUser, type UserRole } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { servers } from '../../db/schema.js';
 
@@ -48,20 +48,22 @@ export async function getAllServerIds(): Promise<string[]> {
 
 /**
  * Generate access and refresh tokens for a user
+ * Note: Caller must verify canLogin(role) before calling this function
  */
 export async function generateTokens(
   app: FastifyInstance,
   userId: string,
   username: string,
-  isOwner: boolean
+  role: UserRole
 ) {
   // Owners get access to ALL servers
-  const serverIds = isOwner ? await getAllServerIds() : [];
+  // TODO: Admins should get servers where they're isServerAdmin=true
+  const serverIds = role === 'owner' ? await getAllServerIds() : [];
 
   const accessPayload: AuthUser = {
     userId,
     username,
-    role: isOwner ? 'owner' : 'guest',
+    role,
     serverIds,
   };
 
