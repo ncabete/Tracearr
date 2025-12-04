@@ -10,7 +10,6 @@ import {
   Expo,
   type ExpoPushMessage,
   type ExpoPushTicket,
-  type ExpoPushReceipt,
 } from 'expo-server-sdk';
 import { eq, isNotNull } from 'drizzle-orm';
 import type { ViolationWithDetails, ActiveSession } from '@tracearr/shared';
@@ -60,7 +59,7 @@ function formatMediaTitle(session: ActiveSession): string {
  * Build full poster URL for rich notifications
  * Returns null if externalUrl is not configured or thumbPath is missing
  */
-async function buildPosterUrl(session: ActiveSession): Promise<string | null> {
+async function _buildPosterUrl(session: ActiveSession): Promise<string | null> {
   const { thumbPath, serverId } = session;
 
   // Need both thumbPath and serverId
@@ -160,7 +159,7 @@ function buildPushMessage(
   }
 
   // Add rich notification image if URL is HTTPS
-  if (notification.imageUrl && notification.imageUrl.startsWith('https://')) {
+  if (notification.imageUrl?.startsWith('https://')) {
     // Note: 'richContent' property holds the image URL in Expo SDK
     // Using type assertion since expo-server-sdk types may not include newer properties
     (message as ExpoPushMessage & { richContent?: { url: string } }).richContent = {
@@ -208,7 +207,7 @@ async function getSessionsWithPreferences(): Promise<SessionWithPrefs[]> {
     .where(isNotNull(mobileSessions.expoPushToken));
 
   return results
-    .filter((s): s is SessionWithPrefs & { expoPushToken: string } => {
+    .filter((s): s is SessionWithPrefs => {
       if (!s.expoPushToken) return false;
       if (tokensToRemove.has(s.expoPushToken)) return false;
       if (!Expo.isExpoPushToken(s.expoPushToken)) return false;
@@ -309,7 +308,7 @@ export async function processPushReceipts(): Promise<void> {
     try {
       const receipts = await expo.getPushNotificationReceiptsAsync(chunk);
 
-      for (const [receiptId, receipt] of Object.entries(receipts) as [string, ExpoPushReceipt][]) {
+      for (const [receiptId, receipt] of Object.entries(receipts)) {
         const token = pendingReceipts.get(receiptId);
 
         if (receipt.status === 'error') {

@@ -9,7 +9,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, desc } from 'drizzle-orm';
 import { z } from 'zod';
-import type { NotificationPreferences, NotificationPreferencesWithStatus, RateLimitStatus } from '@tracearr/shared';
+import type { NotificationPreferences, NotificationPreferencesWithStatus } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { mobileSessions, notificationPreferences } from '../db/schema.js';
 import { getPushRateLimiter } from '../services/pushRateLimiter.js';
@@ -54,7 +54,7 @@ async function findMobileSessionByDeviceId(deviceId: string): Promise<{ id: stri
  * Find mobile session for user (fallback for legacy tokens without deviceId)
  * Gets the most recently active session for the owner
  */
-async function findMobileSessionForUserFallback(userId: string): Promise<{ id: string } | null> {
+async function findMobileSessionForUserFallback(_userId: string): Promise<{ id: string } | null> {
   // Get the most recently active session (desc ordering)
   const session = await db
     .select({ id: mobileSessions.id })

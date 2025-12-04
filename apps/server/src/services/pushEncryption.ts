@@ -17,7 +17,6 @@ import {
   createCipheriv,
   randomBytes,
   pbkdf2Sync,
-  type CipherGCM,
 } from 'node:crypto';
 import type { EncryptedPushPayload } from '@tracearr/shared';
 
@@ -26,7 +25,7 @@ const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
 const IV_LENGTH = 12; // 96 bits (recommended for GCM)
 const SALT_LENGTH = 16; // 128 bits (NIST recommended minimum)
-const AUTH_TAG_LENGTH = 16; // 128 bits
+const _AUTH_TAG_LENGTH = 16; // 128 bits
 const PBKDF2_ITERATIONS = 100000;
 
 /**
@@ -56,7 +55,7 @@ export function encryptPushPayload(
   const key = deriveKey(deviceSecret, salt);
 
   // Create cipher
-  const cipher = createCipheriv(ALGORITHM, key, iv) as CipherGCM;
+  const cipher = createCipheriv(ALGORITHM, key, iv);
 
   // Encrypt payload
   const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');

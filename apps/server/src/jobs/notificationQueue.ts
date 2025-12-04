@@ -133,7 +133,7 @@ export function startNotificationWorker(): void {
   );
 
   // Handle failed jobs that exceed retry attempts - move to DLQ
-  notificationWorker.on('failed', async (job, error) => {
+  notificationWorker.on('failed', (job, error) => {
     if (job && job.attemptsMade >= (job.opts.attempts || 3)) {
       console.error(
         `Notification job ${job.id} (${job.data.type}) exhausted retries, moving to DLQ:`,
@@ -142,7 +142,7 @@ export function startNotificationWorker(): void {
 
       // Move to dead letter queue for manual investigation
       if (dlqQueue) {
-        await dlqQueue.add(`dlq-${job.data.type}`, job.data, {
+        void dlqQueue.add(`dlq-${job.data.type}`, job.data, {
           jobId: `dlq-${job.id}`,
         });
       }
@@ -245,10 +245,11 @@ async function processNotificationJob(job: Job<NotificationJobData>): Promise<vo
       }
       break;
 
-    default:
+    default: {
       // TypeScript exhaustiveness check
       const _exhaustive: never = type;
       throw new Error(`Unknown notification type: ${_exhaustive}`);
+    }
   }
 }
 
