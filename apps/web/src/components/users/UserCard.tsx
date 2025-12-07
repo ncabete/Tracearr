@@ -1,5 +1,7 @@
+import { Link } from 'react-router';
 import { User, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAvatarUrl, getTrustScoreColor, getTrustScoreBg, MEDALS } from './utils';
 
 interface UserCardProps {
   userId: string;
@@ -13,36 +15,11 @@ interface UserCardProps {
   topContent?: string | null;
   rank: 1 | 2 | 3;
   className?: string;
+  style?: React.CSSProperties;
 }
-
-function getAvatarUrl(serverId: string | null | undefined, thumbUrl: string | null | undefined, size = 100) {
-  if (!thumbUrl) return null;
-  // If thumbUrl is already a full URL (e.g., from Plex.tv), use it directly
-  if (thumbUrl.startsWith('http')) return thumbUrl;
-  // Otherwise, proxy through our server
-  if (!serverId) return null;
-  return `/api/v1/images/proxy?server=${serverId}&url=${encodeURIComponent(thumbUrl)}&width=${size}&height=${size}&fallback=avatar`;
-}
-
-function getTrustScoreColor(score: number) {
-  if (score >= 80) return 'text-green-500';
-  if (score >= 50) return 'text-yellow-500';
-  return 'text-red-500';
-}
-
-function getTrustScoreBg(score: number) {
-  if (score >= 80) return 'bg-green-500/20';
-  if (score >= 50) return 'bg-yellow-500/20';
-  return 'bg-red-500/20';
-}
-
-const MEDALS = {
-  1: { emoji: '🥇', color: 'from-yellow-400 to-yellow-600', size: 'h-20 w-20' },
-  2: { emoji: '🥈', color: 'from-gray-300 to-gray-500', size: 'h-16 w-16' },
-  3: { emoji: '🥉', color: 'from-amber-600 to-amber-800', size: 'h-16 w-16' },
-} as const;
 
 export function UserCard({
+  userId,
   username,
   thumbUrl,
   serverId,
@@ -52,26 +29,39 @@ export function UserCard({
   topContent,
   rank,
   className,
+  style,
 }: UserCardProps) {
   const avatarUrl = getAvatarUrl(serverId, thumbUrl);
   const medal = MEDALS[rank];
 
   return (
-    <div
+    <Link
+      to={`/users/${userId}`}
       className={cn(
-        'group relative flex flex-col items-center rounded-xl border bg-card p-6 text-center transition-all duration-300 hover:scale-[1.03] hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10',
-        rank === 1 && 'animate-fade-in-up border-yellow-500/30 bg-gradient-to-b from-yellow-500/5 to-transparent',
-        rank !== 1 && 'animate-fade-in',
+        'group relative flex flex-col items-center rounded-xl border bg-card p-6 text-center transition-all duration-300 hover:scale-[1.02] hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10',
+        'animate-fade-in-up',
         className
       )}
+      style={{
+        ...style,
+        animationDelay: rank === 1 ? '0ms' : rank === 2 ? '100ms' : '200ms',
+      }}
     >
+      {/* Subtle gradient background based on medal */}
+      <div
+        className={cn(
+          'pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-b opacity-50 transition-opacity group-hover:opacity-70',
+          medal.bgColor
+        )}
+      />
+
       {/* Medal */}
-      <div className="absolute -top-3 text-3xl">{medal.emoji}</div>
+      <div className="relative z-10 absolute -top-3 text-3xl drop-shadow-md">{medal.emoji}</div>
 
       {/* Avatar */}
       <div
         className={cn(
-          'relative mt-4 overflow-hidden rounded-full bg-gradient-to-br shadow-lg',
+          'relative z-10 mt-4 overflow-hidden rounded-full bg-gradient-to-br shadow-lg ring-2 ring-background',
           medal.color,
           medal.size
         )}
@@ -81,7 +71,7 @@ export function UserCard({
             <img
               src={avatarUrl}
               alt={username}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
               loading="lazy"
             />
           ) : (
@@ -93,35 +83,35 @@ export function UserCard({
       </div>
 
       {/* Name */}
-      <h3 className="mt-4 text-lg font-semibold">{username}</h3>
+      <h3 className="relative z-10 mt-4 w-full px-2 text-center text-base font-semibold line-clamp-2 break-words">{username}</h3>
 
       {/* Stats */}
-      <div className="mt-2 flex items-center gap-4 text-sm">
+      <div className="relative z-10 mt-2 flex items-center gap-4 text-sm">
         <div>
-          <span className="font-semibold text-primary">{playCount}</span>
+          <span className="font-semibold text-primary">{playCount.toLocaleString()}</span>
           <span className="ml-1 text-muted-foreground">plays</span>
         </div>
-        <div className="text-muted-foreground">{watchTimeHours}h</div>
+        <div className="text-muted-foreground">{watchTimeHours.toLocaleString()}h</div>
       </div>
 
       {/* Trust Score */}
       <div
         className={cn(
-          'mt-3 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
+          'relative z-10 mt-3 flex w-24 items-center justify-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
           getTrustScoreBg(trustScore),
           getTrustScoreColor(trustScore)
         )}
       >
-        <Trophy className="h-3 w-3" />
-        Trust: {trustScore}%
+        <Trophy className="h-3 w-3 shrink-0" />
+        <span>Trust: {trustScore}%</span>
       </div>
 
       {/* Top Content */}
       {topContent && (
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="relative z-10 mt-2 w-full px-2 text-center text-xs text-muted-foreground truncate">
           Loves: <span className="font-medium">{topContent}</span>
         </p>
       )}
-    </div>
+    </Link>
   );
 }
