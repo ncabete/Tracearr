@@ -21,6 +21,7 @@ vi.mock('../../db/client.js', () => ({
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    execute: vi.fn(),
   },
 }));
 
@@ -56,9 +57,11 @@ interface MockViolationWithJoins {
   ruleId: string;
   ruleName: string;
   ruleType: string;
-  userId: string;
+  serverUserId: string;
   username: string;
   userThumb: string | null;
+  serverId: string;
+  serverName: string;
   sessionId: string;
   mediaTitle: string;
   severity: ViolationSeverity;
@@ -75,14 +78,17 @@ interface MockViolationWithJoins {
 function createTestViolation(
   overrides: Partial<MockViolationWithJoins> = {}
 ): MockViolationWithJoins {
+  const serverId = overrides.serverId ?? randomUUID();
   return {
     id: overrides.id ?? randomUUID(),
     ruleId: overrides.ruleId ?? randomUUID(),
     ruleName: overrides.ruleName ?? 'Test Rule',
     ruleType: overrides.ruleType ?? 'concurrent_streams',
-    userId: overrides.userId ?? randomUUID(),
+    serverUserId: overrides.serverUserId ?? randomUUID(),
     username: overrides.username ?? 'testuser',
     userThumb: overrides.userThumb ?? null,
+    serverId,
+    serverName: overrides.serverName ?? 'Test Server',
     sessionId: overrides.sessionId ?? randomUUID(),
     mediaTitle: overrides.mediaTitle ?? 'Test Movie',
     severity: overrides.severity ?? 'warning',
@@ -121,6 +127,69 @@ function createViewerUser(): AuthUser {
   };
 }
 
+/**
+ * Helper to create the mock chain for violation queries with 4 innerJoins
+ * (rules, serverUsers, servers, sessions)
+ */
+function createViolationSelectMock(resolvedValue: unknown) {
+  return {
+    from: vi.fn().mockReturnValue({
+      innerJoin: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          innerJoin: vi.fn().mockReturnValue({
+            innerJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                orderBy: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockReturnValue({
+                    offset: vi.fn().mockResolvedValue(resolvedValue),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  };
+}
+
+/**
+ * Helper to create the mock chain for single violation queries (GET /:id)
+ */
+function createSingleViolationSelectMock(resolvedValue: unknown) {
+  return {
+    from: vi.fn().mockReturnValue({
+      innerJoin: vi.fn().mockReturnValue({
+        innerJoin: vi.fn().mockReturnValue({
+          innerJoin: vi.fn().mockReturnValue({
+            innerJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue(resolvedValue),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  };
+}
+
+/**
+ * Helper to create mock for violation existence check (PATCH/DELETE)
+ * Uses serverUsers join for server access check
+ */
+function createViolationExistsCheckMock(resolvedValue: unknown) {
+  return {
+    from: vi.fn().mockReturnValue({
+      innerJoin: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue(resolvedValue),
+        }),
+      }),
+    }),
+  };
+}
+
 describe('Violation Routes', () => {
   let app: FastifyInstance;
   let mockDb: any;
@@ -147,31 +216,11 @@ describe('Violation Routes', () => {
         createTestViolation({ severity: 'low' }),
       ];
 
-      // Mock the violations query
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(testViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
+      // Mock the violations query (4 innerJoins)
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(testViolations));
 
-      // Mock the count query
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 3 }]),
-        }),
-      });
+      // Mock the count query (uses db.execute with raw SQL)
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 3 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -189,29 +238,8 @@ describe('Violation Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue([]),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 0 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock([]));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 0 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -228,29 +256,8 @@ describe('Violation Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue([]),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 100 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock([]));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 100 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -272,29 +279,8 @@ describe('Violation Routes', () => {
         createTestViolation({ severity: 'high' }),
       ];
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(highSeverityViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 1 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(highSeverityViolations));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -315,29 +301,8 @@ describe('Violation Routes', () => {
         createTestViolation({ acknowledgedAt: null }),
       ];
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(unacknowledgedViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 1 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(unacknowledgedViolations));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -350,40 +315,19 @@ describe('Violation Routes', () => {
       expect(body.data[0].acknowledgedAt).toBeNull();
     });
 
-    it('should filter by userId', async () => {
+    it('should filter by serverUserId', async () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
-      const userId = randomUUID();
-      const userViolations = [createTestViolation({ userId })];
+      const serverUserId = randomUUID();
+      const userViolations = [createTestViolation({ serverUserId })];
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(userViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 1 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(userViolations));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
 
       const response = await app.inject({
         method: 'GET',
-        url: `/violations?userId=${userId}`,
+        url: `/violations?serverUserId=${serverUserId}`,
       });
 
       expect(response.statusCode).toBe(200);
@@ -398,29 +342,8 @@ describe('Violation Routes', () => {
       const ruleId = randomUUID();
       const ruleViolations = [createTestViolation({ ruleId })];
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(ruleViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 1 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(ruleViolations));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -456,37 +379,15 @@ describe('Violation Routes', () => {
       expect(response.statusCode).toBe(400);
     });
 
-    it('should return empty data for guests (filtered out)', async () => {
-      const guestUser = createViewerUser();
-      app = await buildTestApp(guestUser);
-
-      const testViolations = [
-        createTestViolation({ severity: 'high' }),
-      ];
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(testViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 1 }]),
-        }),
-      });
+    it('should return empty data for viewers with no server access', async () => {
+      // Viewer with empty serverIds returns empty result without querying
+      const viewerUser: AuthUser = {
+        userId: randomUUID(),
+        username: 'viewer',
+        role: 'viewer',
+        serverIds: [],
+      };
+      app = await buildTestApp(viewerUser);
 
       const response = await app.inject({
         method: 'GET',
@@ -495,8 +396,8 @@ describe('Violation Routes', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body);
-      // Guests are filtered out in the route logic
       expect(body.data).toHaveLength(0);
+      expect(body.total).toBe(0);
     });
   });
 
@@ -508,19 +409,7 @@ describe('Violation Routes', () => {
       const violationId = randomUUID();
       const testViolation = createTestViolation({ id: violationId });
 
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockResolvedValue([testViolation]),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createSingleViolationSelectMock([testViolation]));
 
       const response = await app.inject({
         method: 'GET',
@@ -532,25 +421,14 @@ describe('Violation Routes', () => {
       expect(body.id).toBe(violationId);
       expect(body.ruleName).toBe('Test Rule');
       expect(body.username).toBe('testuser');
+      expect(body.serverName).toBe('Test Server');
     });
 
     it('should return 404 for non-existent violation', async () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockResolvedValue([]),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createSingleViolationSelectMock([]));
 
       const response = await app.inject({
         method: 'GET',
@@ -586,19 +464,7 @@ describe('Violation Routes', () => {
         platform: 'macOS',
       });
 
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockResolvedValue([testViolation]),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createSingleViolationSelectMock([testViolation]));
 
       const response = await app.inject({
         method: 'GET',
@@ -621,16 +487,11 @@ describe('Violation Routes', () => {
       app = await buildTestApp(ownerUser);
 
       const violationId = randomUUID();
+      const serverId = ownerUser.serverIds[0];
       const acknowledgedAt = new Date();
 
-      // Violation exists check
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([{ id: violationId }]),
-          }),
-        }),
-      });
+      // Violation exists check with serverUsers join
+      mockDb.select.mockReturnValue(createViolationExistsCheckMock([{ id: violationId, serverId }]));
 
       // Update
       mockDb.update.mockReturnValue({
@@ -668,13 +529,7 @@ describe('Violation Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createViolationExistsCheckMock([]));
 
       const response = await app.inject({
         method: 'PATCH',
@@ -701,15 +556,10 @@ describe('Violation Routes', () => {
       app = await buildTestApp(ownerUser);
 
       const violationId = randomUUID();
+      const serverId = ownerUser.serverIds[0];
 
       // Violation exists check
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([{ id: violationId }]),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createViolationExistsCheckMock([{ id: violationId, serverId }]));
 
       // Update returns empty (failure)
       mockDb.update.mockReturnValue({
@@ -735,15 +585,10 @@ describe('Violation Routes', () => {
       app = await buildTestApp(ownerUser);
 
       const violationId = randomUUID();
+      const serverId = ownerUser.serverIds[0];
 
-      // Violation exists check
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([{ id: violationId }]),
-          }),
-        }),
-      });
+      // Violation exists check with serverUsers join
+      mockDb.select.mockReturnValue(createViolationExistsCheckMock([{ id: violationId, serverId }]));
 
       // Delete
       mockDb.delete.mockReturnValue({
@@ -776,13 +621,7 @@ describe('Violation Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
-      mockDb.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
-          }),
-        }),
-      });
+      mockDb.select.mockReturnValue(createViolationExistsCheckMock([]));
 
       const response = await app.inject({
         method: 'DELETE',
@@ -811,33 +650,12 @@ describe('Violation Routes', () => {
       app = await buildTestApp(ownerUser);
 
       const testViolations = [
-        createTestViolation({ userId: randomUUID() }),
-        createTestViolation({ userId: randomUUID() }),
+        createTestViolation({ serverUserId: randomUUID() }),
+        createTestViolation({ serverUserId: randomUUID() }),
       ];
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(testViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 2 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(testViolations));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 2 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -849,37 +667,23 @@ describe('Violation Routes', () => {
       expect(body.data).toHaveLength(2);
     });
 
-    it('should filter violations for guest users', async () => {
-      const guestUser = createViewerUser();
-      app = await buildTestApp(guestUser);
+    it('should filter violations by server access for viewers', async () => {
+      const viewerServerId = randomUUID();
+      const viewerUser: AuthUser = {
+        userId: randomUUID(),
+        username: 'viewer',
+        role: 'viewer',
+        serverIds: [viewerServerId],
+      };
+      app = await buildTestApp(viewerUser);
 
+      // Return violations from the viewer's accessible server
       const testViolations = [
-        createTestViolation({ userId: randomUUID() }),
+        createTestViolation({ serverId: viewerServerId }),
       ];
 
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              innerJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      offset: vi.fn().mockResolvedValue(testViolations),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
-        }),
-      });
-
-      mockDb.select.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ count: 1 }]),
-        }),
-      });
+      mockDb.select.mockReturnValueOnce(createViolationSelectMock(testViolations));
+      mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
 
       const response = await app.inject({
         method: 'GET',
@@ -888,8 +692,8 @@ describe('Violation Routes', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body);
-      // Current implementation filters all violations for non-owners
-      expect(body.data).toHaveLength(0);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].serverId).toBe(viewerServerId);
     });
   });
 });

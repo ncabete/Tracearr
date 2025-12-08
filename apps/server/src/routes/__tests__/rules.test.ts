@@ -109,18 +109,23 @@ describe('Rule Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
+      const serverId = ownerUser.serverIds[0]; // Use owner's server
       const testRules = [
-        createTestRule({ name: 'Rule 1' }),
-        createTestRule({ name: 'Rule 2', serverUserId: randomUUID() }),
+        createTestRule({ name: 'Rule 1' }), // Global rule
+        createTestRule({ name: 'Rule 2', serverUserId: randomUUID() }), // User-specific rule
       ];
 
-      // Mock the database chain
+      // Mock the database chain (2 leftJoins: serverUsers and servers)
+      // Rule 1 is global (no serverUserId), Rule 2 is user-specific with serverId
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
           leftJoin: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockResolvedValue(
-              testRules.map(r => ({ ...r, username: null }))
-            ),
+            leftJoin: vi.fn().mockReturnValue({
+              orderBy: vi.fn().mockResolvedValue([
+                { ...testRules[0], username: null, serverId: null, serverName: null },
+                { ...testRules[1], username: 'testuser', serverId, serverName: 'Test Server' },
+              ]),
+            }),
           }),
         }),
       });
@@ -142,13 +147,16 @@ describe('Rule Routes', () => {
       const globalRule = createTestRule({ name: 'Global Rule', serverUserId: null });
       const userRule = createTestRule({ name: 'User Rule', serverUserId: randomUUID() });
 
+      // Mock the database chain (2 leftJoins: serverUsers and servers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
           leftJoin: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockResolvedValue([
-              { ...globalRule, username: null },
-              { ...userRule, username: 'someone' },
-            ]),
+            leftJoin: vi.fn().mockReturnValue({
+              orderBy: vi.fn().mockResolvedValue([
+                { ...globalRule, username: null, serverId: null, serverName: null },
+                { ...userRule, username: 'someone', serverId: randomUUID(), serverName: 'Test Server' },
+              ]),
+            }),
           }),
         }),
       });
@@ -323,12 +331,14 @@ describe('Rule Routes', () => {
       const ruleId = randomUUID();
       const testRule = createTestRule({ id: ruleId });
 
-      // Mock rule query
+      // Mock rule query (2 leftJoins: serverUsers and servers)
       mockDb.select.mockReturnValueOnce({
         from: vi.fn().mockReturnValue({
           leftJoin: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([{ ...testRule, username: null }]),
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([{ ...testRule, username: null, serverId: null, serverName: null }]),
+              }),
             }),
           }),
         }),
@@ -356,11 +366,14 @@ describe('Rule Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
+      // Mock rule query (2 leftJoins: serverUsers and servers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
           leftJoin: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([]),
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([]),
+              }),
             }),
           }),
         }),
@@ -396,11 +409,13 @@ describe('Rule Routes', () => {
       const existingRule = createTestRule({ id: ruleId, name: 'Old Name' });
       const updatedRule = { ...existingRule, name: 'New Name' };
 
-      // Rule exists check
+      // Rule exists check (1 leftJoin to serverUsers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([existingRule]),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ ...existingRule, serverId: null }]),
+            }),
           }),
         }),
       });
@@ -446,10 +461,13 @@ describe('Rule Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
+      // Rule exists check (1 leftJoin to serverUsers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
           }),
         }),
       });
@@ -473,10 +491,13 @@ describe('Rule Routes', () => {
       const existingRule = createTestRule({ id: ruleId, isActive: true });
       const updatedRule = { ...existingRule, isActive: false };
 
+      // Rule exists check (1 leftJoin to serverUsers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([existingRule]),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ ...existingRule, serverId: null }]),
+            }),
           }),
         }),
       });
@@ -510,10 +531,13 @@ describe('Rule Routes', () => {
       const existingRule = createTestRule({ id: ruleId });
       const updatedRule = { ...existingRule, params: { maxStreams: 5 } };
 
+      // Rule exists check (1 leftJoin to serverUsers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([existingRule]),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ ...existingRule, serverId: null }]),
+            }),
           }),
         }),
       });
@@ -546,11 +570,13 @@ describe('Rule Routes', () => {
       const ruleId = randomUUID();
       const existingRule = createTestRule({ id: ruleId });
 
-      // Rule exists check
+      // Rule exists check (1 leftJoin to serverUsers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([existingRule]),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([{ ...existingRule, serverId: null }]),
+            }),
           }),
         }),
       });
@@ -586,10 +612,13 @@ describe('Rule Routes', () => {
       const ownerUser = createOwnerUser();
       app = await buildTestApp(ownerUser);
 
+      // Rule exists check (1 leftJoin to serverUsers)
       mockDb.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
+          leftJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
           }),
         }),
       });
