@@ -1,0 +1,48 @@
+# Tracearr All-in-One (Supervised) Deployment
+#
+# This compose file runs the supervised image which includes:
+# - TimescaleDB (PostgreSQL 15)
+# - Redis
+# - Tracearr application
+#
+# No external database or Redis required!
+# Secrets are auto-generated on first run and persisted.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.supervised.yml up -d
+#
+# Data is stored in Docker volumes by default.
+# For bind mounts, uncomment the volumes section below.
+
+services:
+  tracearr:
+    image: ghcr.io/connorgallopo/tracearr:supervised
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Optional: Override auto-generated secrets
+      # - JWT_SECRET=${JWT_SECRET}
+      # - COOKIE_SECRET=${COOKIE_SECRET}
+      # - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    volumes:
+      - tracearr_postgres:/data/postgres
+      - tracearr_redis:/data/redis
+      - tracearr_data:/data/tracearr
+      # Bind mount alternative (uncomment and adjust paths):
+      # - ./data/postgres:/data/postgres
+      # - ./data/redis:/data/redis
+      # - ./data/tracearr:/data/tracearr
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  tracearr_postgres:
+  tracearr_redis:
+  tracearr_data:
