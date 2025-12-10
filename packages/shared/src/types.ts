@@ -268,7 +268,7 @@ export interface Violation {
 
 export interface ViolationWithDetails extends Violation {
   rule: Pick<Rule, 'id' | 'name' | 'type'>;
-  user: Pick<ServerUser, 'id' | 'username' | 'thumbUrl'>;
+  user: Pick<ServerUser, 'id' | 'username' | 'thumbUrl' | 'serverId'>;
   server?: Pick<Server, 'id' | 'name' | 'type'>;
 }
 
