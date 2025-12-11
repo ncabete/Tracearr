@@ -178,6 +178,8 @@ async function processNotificationJob(job: Job<NotificationJobData>): Promise<vo
     // Only include webhook URLs if routing allows
     discordWebhookUrl: routing.discordEnabled ? settings.discordWebhookUrl : null,
     customWebhookUrl: routing.webhookEnabled ? settings.customWebhookUrl : null,
+    webhookFormat: settings.webhookFormat,
+    ntfyTopic: settings.ntfyTopic,
     // Fill in defaults for other Settings fields
     allowGuestAccess: false,
     pollerEnabled: true,

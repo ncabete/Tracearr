@@ -58,6 +58,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         allowGuestAccess: row.allowGuestAccess,
         discordWebhookUrl: row.discordWebhookUrl,
         customWebhookUrl: row.customWebhookUrl,
+        webhookFormat: row.webhookFormat,
+        ntfyTopic: row.ntfyTopic,
         notifyOnViolation: row.notifyOnViolation,
         notifyOnSessionStart: row.notifyOnSessionStart,
         notifyOnSessionStop: row.notifyOnSessionStop,
@@ -100,6 +102,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         allowGuestAccess: boolean;
         discordWebhookUrl: string | null;
         customWebhookUrl: string | null;
+        webhookFormat: 'json' | 'ntfy' | 'apprise' | null;
+        ntfyTopic: string | null;
         notifyOnViolation: boolean;
         notifyOnSessionStart: boolean;
         notifyOnSessionStop: boolean;
@@ -126,6 +130,14 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
       if (body.data.customWebhookUrl !== undefined) {
         updateData.customWebhookUrl = body.data.customWebhookUrl;
+      }
+
+      if (body.data.webhookFormat !== undefined) {
+        updateData.webhookFormat = body.data.webhookFormat;
+      }
+
+      if (body.data.ntfyTopic !== undefined) {
+        updateData.ntfyTopic = body.data.ntfyTopic;
       }
 
       if (body.data.notifyOnViolation !== undefined) {
@@ -223,6 +235,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         allowGuestAccess: row.allowGuestAccess,
         discordWebhookUrl: row.discordWebhookUrl,
         customWebhookUrl: row.customWebhookUrl,
+        webhookFormat: row.webhookFormat,
+        ntfyTopic: row.ntfyTopic,
         notifyOnViolation: row.notifyOnViolation,
         notifyOnSessionStart: row.notifyOnSessionStart,
         notifyOnSessionStop: row.notifyOnSessionStop,
@@ -308,6 +322,8 @@ export interface NotificationSettings {
   notifyOnServerDown: boolean;
   discordWebhookUrl: string | null;
   customWebhookUrl: string | null;
+  webhookFormat: 'json' | 'ntfy' | 'apprise' | null;
+  ntfyTopic: string | null;
   webhookSecret: string | null;
   mobileEnabled: boolean;
 }
@@ -324,6 +340,8 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
       notifyOnServerDown: settings.notifyOnServerDown,
       discordWebhookUrl: settings.discordWebhookUrl,
       customWebhookUrl: settings.customWebhookUrl,
+      webhookFormat: settings.webhookFormat,
+      ntfyTopic: settings.ntfyTopic,
       mobileEnabled: settings.mobileEnabled,
     })
     .from(settings)
@@ -340,6 +358,8 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
       notifyOnServerDown: true,
       discordWebhookUrl: null,
       customWebhookUrl: null,
+      webhookFormat: null,
+      ntfyTopic: null,
       webhookSecret: null,
       mobileEnabled: false,
     };
@@ -352,6 +372,8 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
     notifyOnServerDown: settingsRow.notifyOnServerDown,
     discordWebhookUrl: settingsRow.discordWebhookUrl,
     customWebhookUrl: settingsRow.customWebhookUrl,
+    webhookFormat: settingsRow.webhookFormat,
+    ntfyTopic: settingsRow.ntfyTopic,
     webhookSecret: null, // TODO: Add webhookSecret column to settings table in Phase 4
     mobileEnabled: settingsRow.mobileEnabled,
   };
