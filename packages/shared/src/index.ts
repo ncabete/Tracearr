@@ -93,6 +93,10 @@ export type {
   // Termination logs
   TerminationTrigger,
   TerminationLogWithDetails,
+  // Plex server discovery
+  PlexDiscoveredConnection,
+  PlexDiscoveredServer,
+  PlexAvailableServersResponse,
 } from './types.js';
 
 // Schema exports

@@ -826,3 +826,33 @@ export interface TerminationLogWithDetails {
   mediaTitle: string | null;
   mediaType: MediaType | null;
 }
+
+// =============================================================================
+// Plex Server Discovery Types
+// =============================================================================
+
+// Connection details for a discovered Plex server
+export interface PlexDiscoveredConnection {
+  uri: string;
+  local: boolean;
+  address: string;
+  port: number;
+  reachable: boolean; // Tested from Tracearr server
+  latencyMs: number | null; // Response time if reachable
+}
+
+// Discovered Plex server from plex.tv resources API
+export interface PlexDiscoveredServer {
+  name: string;
+  platform: string;
+  version: string;
+  clientIdentifier: string; // Unique server identifier
+  recommendedUri: string | null; // Best reachable connection
+  connections: PlexDiscoveredConnection[];
+}
+
+// Response from GET /auth/plex/available-servers
+export interface PlexAvailableServersResponse {
+  servers: PlexDiscoveredServer[];
+  hasPlexToken: boolean; // False if user has no Plex servers connected
+}
