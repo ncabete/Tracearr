@@ -1,4 +1,3 @@
-import { Server } from 'lucide-react';
 import { useServer } from '@/hooks/useServer';
 import {
   Select,
@@ -8,6 +7,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
 
 export function ServerSelector() {
   const { servers, selectedServerId, selectServer, isLoading } = useServer();
@@ -29,25 +29,32 @@ export function ServerSelector() {
     const server = servers[0]!;
     return (
       <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
-        <Server className="h-4 w-4" />
+        <MediaServerIcon type={server.type} className="h-4 w-4" />
         <span className="truncate font-medium">{server.name}</span>
       </div>
     );
   }
+
+  const selectedServer = servers.find((s) => s.id === selectedServerId);
 
   return (
     <div className="px-4 py-2">
       <Select value={selectedServerId ?? undefined} onValueChange={selectServer}>
         <SelectTrigger className="h-9 w-full">
           <div className="flex items-center gap-2">
-            <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {selectedServer ? (
+              <MediaServerIcon type={selectedServer.type} className="h-4 w-4 shrink-0" />
+            ) : null}
             <SelectValue placeholder="Select server" />
           </div>
         </SelectTrigger>
         <SelectContent>
           {servers.map((server) => (
             <SelectItem key={server.id} value={server.id}>
-              <span className="truncate">{server.name}</span>
+              <div className="flex items-center gap-2">
+                <MediaServerIcon type={server.type} className="h-4 w-4 shrink-0" />
+                <span className="truncate">{server.name}</span>
+              </div>
             </SelectItem>
           ))}
         </SelectContent>

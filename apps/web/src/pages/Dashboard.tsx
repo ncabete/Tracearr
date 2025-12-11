@@ -1,4 +1,5 @@
-import { Play, Clock, AlertTriangle, Tv, Server, MapPin, Calendar, Users } from 'lucide-react';
+import { Play, Clock, AlertTriangle, Tv, MapPin, Calendar, Users } from 'lucide-react';
+import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { NowPlayingCard } from '@/components/sessions';
@@ -150,7 +151,7 @@ export function Dashboard() {
       {isPlexServer && (
         <section>
           <div className="mb-4 flex items-center gap-2">
-            <Server className="h-5 w-5 text-primary" />
+            <MediaServerIcon type="plex" className="h-5 w-5" />
             <h2 className="text-lg font-semibold">Server Resources</h2>
           </div>
           <ServerResourceCharts
