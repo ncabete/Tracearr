@@ -478,10 +478,6 @@ export const settings = pgTable('settings', {
   customWebhookUrl: text('custom_webhook_url'),
   webhookFormat: text('webhook_format').$type<'json' | 'ntfy' | 'apprise'>(), // Format for custom webhook payloads
   ntfyTopic: text('ntfy_topic'), // Topic for ntfy notifications (required when webhookFormat is 'ntfy')
-  notifyOnViolation: boolean('notify_on_violation').notNull().default(true),
-  notifyOnSessionStart: boolean('notify_on_session_start').notNull().default(false),
-  notifyOnSessionStop: boolean('notify_on_session_stop').notNull().default(false),
-  notifyOnServerDown: boolean('notify_on_server_down').notNull().default(true),
   // Poller settings
   pollerEnabled: boolean('poller_enabled').notNull().default(true),
   pollerIntervalMs: integer('poller_interval_ms').notNull().default(15000),
