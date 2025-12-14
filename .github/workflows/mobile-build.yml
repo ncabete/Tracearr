@@ -204,6 +204,8 @@ jobs:
 
       - name: Build Android locally
         id: build
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
           BUILD_TYPE="${{ inputs.distribution == 'internal' && 'apk' || 'app-bundle' }}"
           OUTPUT_EXT="${{ inputs.distribution == 'internal' && 'apk' || 'aab' }}"
@@ -360,6 +362,7 @@ jobs:
 
       - name: Upload Android to EAS
         if: needs.build-android.result == 'success'
+        continue-on-error: true
         run: |
           APK_FILE=$(ls *.apk 2>/dev/null || ls *.aab 2>/dev/null)
           echo "Uploading $APK_FILE to EAS..."
@@ -367,6 +370,7 @@ jobs:
 
       - name: Upload iOS to EAS
         if: needs.build-ios.result == 'success'
+        continue-on-error: true
         run: |
           IPA_FILE=$(ls *.ipa)
           echo "Uploading $IPA_FILE to EAS..."
