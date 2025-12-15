@@ -130,6 +130,9 @@ export const serverUsers = pgTable(
     email: varchar('email', { length: 255 }), // Email from server sync (may differ from users.email)
     thumbUrl: text('thumb_url'), // Avatar from server
 
+    // When user joined/was added to media server (Plex provides this, Jellyfin/Emby don't)
+    joinedAt: timestamp('joined_at', { withTimezone: true }),
+
     // Server-specific permissions
     isServerAdmin: boolean('is_server_admin').notNull().default(false),
 
