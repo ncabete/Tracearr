@@ -775,9 +775,10 @@ class ApiClient {
        */
       start: async (serverId: string, file: File, enrichMedia: boolean = true) => {
         const formData = new FormData();
-        formData.append('file', file);
+        // Fields must come BEFORE file - @fastify/multipart stops parsing after file
         formData.append('serverId', serverId);
         formData.append('enrichMedia', String(enrichMedia));
+        formData.append('file', file);
 
         return this.request<{ status: string; jobId?: string; message: string }>(
           '/import/jellystat',

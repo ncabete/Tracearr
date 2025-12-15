@@ -476,14 +476,8 @@ export async function importJellystatBackup(
     }
 
     if (skippedUsers.size > 0) {
-      const skippedUserList = [...skippedUsers.values()]
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5)
-        .map((u) => `${u.username ?? 'Unknown'} (${u.count} records)`)
-        .join(', ');
-
-      const moreUsers = skippedUsers.size > 5 ? ` and ${skippedUsers.size - 5} more` : '';
-      message += `. Warning: ${skippedUsers.size} users not found in Tracearr: ${skippedUserList}${moreUsers}. Sync your server to import these users first.`;
+      const totalSkippedRecords = [...skippedUsers.values()].reduce((sum, u) => sum + u.count, 0);
+      message += `. Warning: ${totalSkippedRecords} records skipped - ${skippedUsers.size} users from backup not found in Tracearr. Sync your server first to import their history.`;
 
       console.warn(
         `[Jellystat] Import skipped users: ${[...skippedUsers.entries()].map(([id, data]) => `${data.username}(${id})`).join(', ')}`
