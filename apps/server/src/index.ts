@@ -31,6 +31,7 @@ import type {
   ViolationWithDetails,
   DashboardStats,
   TautulliImportProgress,
+  JellystatImportProgress,
 } from '@tracearr/shared';
 
 import authPlugin from './plugins/auth.js';
@@ -449,6 +450,9 @@ async function start() {
             break;
           case WS_EVENTS.IMPORT_PROGRESS:
             broadcastToSessions('import:progress', data as TautulliImportProgress);
+            break;
+          case WS_EVENTS.IMPORT_JELLYSTAT_PROGRESS:
+            broadcastToSessions('import:jellystat:progress', data as JellystatImportProgress);
             break;
           case WS_EVENTS.VERSION_UPDATE:
             broadcastToSessions(

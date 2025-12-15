@@ -361,6 +361,7 @@ export async function createServerUser(data: {
   email?: string;
   thumbUrl?: string;
   isServerAdmin?: boolean;
+  joinedAt?: Date;
 }): Promise<ServerUser> {
   const rows = await db
     .insert(serverUsers)
@@ -372,6 +373,7 @@ export async function createServerUser(data: {
       email: data.email ?? null,
       thumbUrl: data.thumbUrl ?? null,
       isServerAdmin: data.isServerAdmin ?? false,
+      joinedAt: data.joinedAt ?? null,
     })
     .returning();
   return rows[0]!;
@@ -517,6 +519,7 @@ export async function syncUserFromMediaServer(
         email: mediaUser.email ?? null,
         thumbUrl: mediaUser.thumb ?? null,
         isServerAdmin: mediaUser.isAdmin,
+        joinedAt: mediaUser.joinedAt ?? null,
       })
       .returning();
 
