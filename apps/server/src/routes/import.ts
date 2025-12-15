@@ -3,19 +3,39 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { tautulliImportSchema } from '@tracearr/shared';
+import multipart from '@fastify/multipart';
+import { eq } from 'drizzle-orm';
+import { tautulliImportSchema, jellystatImportBodySchema } from '@tracearr/shared';
 import { TautulliService } from '../services/tautulli.js';
+import { importJellystatBackup } from '../services/jellystat.js';
 import { getPubSubService } from '../services/cache.js';
 import { syncServer } from '../services/sync.js';
+import { db } from '../db/client.js';
+import { servers } from '../db/schema.js';
 import {
   enqueueImport,
+  enqueueJellystatImport,
   getImportStatus,
+  getJellystatImportStatus,
   cancelImport,
+  cancelJellystatImport,
   getImportQueueStats,
   getActiveImportForServer,
+  getActiveJellystatImportForServer,
 } from '../jobs/importQueue.js';
 
 export const importRoutes: FastifyPluginAsync = async (app) => {
+  // Register multipart plugin for file uploads (Jellystat backup)
+  await app.register(multipart, {
+    limits: {
+      fileSize: 100 * 1024 * 1024, // 100MB max file size
+    },
+  });
+
+  // ==========================================================================
+  // Tautulli Import Routes (for Plex servers)
+  // ==========================================================================
+
   /**
    * POST /import/tautulli - Start Tautulli import (enqueues job)
    */
@@ -203,4 +223,176 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
       };
     }
   });
+
+  // ==========================================================================
+  // Jellystat Import Routes (for Jellyfin/Emby servers)
+  // ==========================================================================
+
+  /**
+   * POST /import/jellystat - Start Jellystat import from backup file
+   *
+   * Accepts multipart form data with:
+   * - file: Jellystat backup JSON file
+   * - serverId: Target server UUID
+   * - enrichMedia: Whether to enrich with metadata (default: true)
+   */
+  app.post(
+    '/jellystat',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const authUser = request.user;
+
+      // Only owners can import data
+      if (authUser.role !== 'owner') {
+        return reply.forbidden('Only server owners can import data');
+      }
+
+      // Parse multipart form data
+      const data = await request.file();
+      if (!data) {
+        return reply.badRequest('No file uploaded');
+      }
+
+      // Get form fields
+      const fields = data.fields as Record<string, { value?: string }>;
+      const serverId = fields.serverId?.value;
+      const enrichMediaStr = fields.enrichMedia?.value ?? 'true';
+      const enrichMedia = enrichMediaStr === 'true';
+
+      // Validate server ID
+      const parsed = jellystatImportBodySchema.safeParse({ serverId, enrichMedia });
+      if (!parsed.success) {
+        return reply.badRequest('Invalid request: serverId is required');
+      }
+
+      // Verify server exists and is Jellyfin/Emby
+      const [server] = await db.select().from(servers).where(eq(servers.id, parsed.data.serverId)).limit(1);
+      if (!server) {
+        return reply.notFound('Server not found');
+      }
+      if (server.type !== 'jellyfin' && server.type !== 'emby') {
+        return reply.badRequest('Jellystat import only supports Jellyfin/Emby servers');
+      }
+
+      // Read file contents
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) {
+        chunks.push(chunk);
+      }
+      const backupJson = Buffer.concat(chunks).toString('utf-8');
+
+      // Sync server users first
+      try {
+        app.log.info({ serverId }, 'Syncing server before Jellystat import');
+        await syncServer(parsed.data.serverId, { syncUsers: true, syncLibraries: false });
+        app.log.info({ serverId }, 'Server sync completed');
+      } catch (error) {
+        app.log.error({ error, serverId }, 'Failed to sync server before import');
+        return reply.internalServerError('Failed to sync server users before import');
+      }
+
+      // Enqueue import job
+      try {
+        const jobId = await enqueueJellystatImport(
+          parsed.data.serverId,
+          authUser.userId,
+          backupJson,
+          parsed.data.enrichMedia
+        );
+
+        return {
+          status: 'queued',
+          jobId,
+          message: 'Import queued. Use jobId to track progress via WebSocket or GET /import/jellystat/:jobId',
+        };
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('already in progress')) {
+          return reply.conflict(error.message);
+        }
+
+        // Fallback to direct execution if queue is not available
+        app.log.warn({ error }, 'Import queue unavailable, falling back to direct execution');
+
+        const pubSubService = getPubSubService();
+
+        // Start import in background (non-blocking)
+        importJellystatBackup(parsed.data.serverId, backupJson, enrichMedia, pubSubService ?? undefined)
+          .then((result) => {
+            console.log(`[Import] Jellystat import completed:`, result);
+          })
+          .catch((err: unknown) => {
+            console.error(`[Import] Jellystat import failed:`, err);
+          });
+
+        return {
+          status: 'started',
+          message: 'Import started (direct execution). Watch for progress updates via WebSocket.',
+        };
+      }
+    }
+  );
+
+  /**
+   * GET /import/jellystat/active/:serverId - Get active Jellystat import for a server
+   */
+  app.get<{ Params: { serverId: string } }>(
+    '/jellystat/active/:serverId',
+    { preHandler: [app.authenticate] },
+    async (request, _reply) => {
+      const { serverId } = request.params;
+
+      const jobId = await getActiveJellystatImportForServer(serverId);
+      if (!jobId) {
+        return { active: false };
+      }
+
+      const status = await getJellystatImportStatus(jobId);
+      if (!status) {
+        return { active: false };
+      }
+
+      return { active: true, ...status };
+    }
+  );
+
+  /**
+   * GET /import/jellystat/:jobId - Get Jellystat import job status
+   */
+  app.get<{ Params: { jobId: string } }>(
+    '/jellystat/:jobId',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { jobId } = request.params;
+
+      const status = await getJellystatImportStatus(jobId);
+      if (!status) {
+        return reply.notFound('Import job not found');
+      }
+
+      return status;
+    }
+  );
+
+  /**
+   * DELETE /import/jellystat/:jobId - Cancel Jellystat import job
+   */
+  app.delete<{ Params: { jobId: string } }>(
+    '/jellystat/:jobId',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const authUser = request.user;
+      if (authUser.role !== 'owner') {
+        return reply.forbidden('Only server owners can cancel imports');
+      }
+
+      const { jobId } = request.params;
+      const cancelled = await cancelJellystatImport(jobId);
+
+      if (!cancelled) {
+        return reply.badRequest('Cannot cancel job (may be active or not found)');
+      }
+
+      return { status: 'cancelled', jobId };
+    }
+  );
 };
