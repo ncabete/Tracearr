@@ -253,10 +253,21 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
         return reply.badRequest('No file uploaded');
       }
 
-      // Get form fields
-      const fields = data.fields as Record<string, { value?: string }>;
-      const serverId = fields.serverId?.value;
-      const enrichMediaStr = fields.enrichMedia?.value ?? 'true';
+      // Get form fields - handle @fastify/multipart field structure
+      // Fields can be single values or arrays, and have a 'value' property
+      const getFieldValue = (field: unknown): string | undefined => {
+        if (!field) return undefined;
+        // If it's an array, get the first element
+        const f = Array.isArray(field) ? field[0] : field;
+        // Check if it's a field (not a file) with a value property
+        if (f && typeof f === 'object' && 'value' in f) {
+          return String(f.value);
+        }
+        return undefined;
+      };
+
+      const serverId = getFieldValue(data.fields.serverId);
+      const enrichMediaStr = getFieldValue(data.fields.enrichMedia) ?? 'true';
       const enrichMedia = enrichMediaStr === 'true';
 
       // Validate server ID
