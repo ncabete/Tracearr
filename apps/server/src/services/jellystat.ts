@@ -11,7 +11,7 @@
  * - Progress tracking via WebSocket
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import type {
   JellystatPlaybackActivity,
   JellystatImportProgress,
@@ -27,10 +27,11 @@ import { JellyfinClient } from './mediaServer/jellyfin/client.js';
 import { EmbyClient } from './mediaServer/emby/client.js';
 
 // Configuration
-const BATCH_SIZE = 100; // Records per batch insert
-const ENRICHMENT_BATCH_SIZE = 100; // Items per Jellyfin API call
+const BATCH_SIZE = 500; // Records per batch insert (larger = faster)
+const DEDUP_BATCH_SIZE = 5000; // Records per dedup query batch
+const ENRICHMENT_BATCH_SIZE = 200; // Items per Jellyfin API call
 const PROGRESS_THROTTLE_MS = 2000; // WebSocket update interval
-const PROGRESS_RECORD_INTERVAL = 100; // Update every N records
+const PROGRESS_RECORD_INTERVAL = 500; // Update every N records
 
 // Jellyfin tick conversion (100ns ticks to milliseconds)
 const TICKS_TO_MS = 10000;
@@ -298,20 +299,8 @@ export async function importJellystatBackup(
       }
     }
 
-    // === Pre-fetch existing sessions for deduplication ===
-    console.log('[Jellystat] Pre-fetching existing sessions for deduplication...');
-    const existingSessions = await db
-      .select({
-        id: sessions.id,
-        externalSessionId: sessions.externalSessionId,
-      })
-      .from(sessions)
-      .where(eq(sessions.serverId, serverId));
-
-    const existingSessionIds = new Set(
-      existingSessions.map((s) => s.externalSessionId).filter((id): id is string => id != null)
-    );
-    console.log(`[Jellystat] Pre-fetched ${existingSessions.length} existing sessions`);
+    // NOTE: We no longer pre-fetch all sessions - instead we query in batches during processing
+    // This reduces memory from O(total_sessions) to O(batch_size)
 
     // === Phase 2: Optional media enrichment ===
     const enrichmentMap = new Map<string, MediaEnrichment>();
@@ -353,16 +342,16 @@ export async function importJellystatBackup(
       console.log(`[Jellystat] Enriched ${enrichmentMap.size} media items`);
     }
 
-    // === Phase 3: Process records ===
+    // === Phase 3: Process records in chunks (batch dedup queries) ===
     progress.status = 'processing';
     progress.message = 'Processing records...';
     publishProgress();
 
-    // GeoIP cache
+    // GeoIP cache (persists across chunks)
     const geoCache = new Map<string, ReturnType<typeof geoipService.lookup>>();
 
-    // Batch collections
-    const insertBatch: (typeof sessions.$inferInsert)[] = [];
+    // Track IDs we've already inserted in this import (to prevent duplicates within same import)
+    const insertedInThisImport = new Set<string>();
 
     let imported = 0;
     let skipped = 0;
@@ -371,94 +360,113 @@ export async function importJellystatBackup(
     // Track skipped users
     const skippedUsers = new Map<string, { username: string | null; count: number }>();
 
-    // Helper to flush insert batch
-    const flushBatch = async () => {
-      if (insertBatch.length > 0) {
-        await db.insert(sessions).values(insertBatch);
-        insertBatch.length = 0;
-      }
-    };
+    // Process in chunks for batch dedup queries
+    for (let chunkStart = 0; chunkStart < activities.length; chunkStart += DEDUP_BATCH_SIZE) {
+      const chunk = activities.slice(chunkStart, chunkStart + DEDUP_BATCH_SIZE);
 
-    for (const activity of activities) {
-      progress.processedRecords++;
+      // Batch dedup query: get existing externalSessionIds for this chunk only
+      const chunkIds = chunk.map((a) => a.Id).filter(Boolean);
+      let existingInChunk = new Set<string>();
 
-      try {
-        // Find server user by Jellyfin GUID
-        const serverUserId = userMap.get(activity.UserId);
-        if (!serverUserId) {
-          // User not found - track for warning
-          const existing = skippedUsers.get(activity.UserId);
-          if (existing) {
-            existing.count++;
-          } else {
-            skippedUsers.set(activity.UserId, {
-              username: activity.UserName ?? null,
-              count: 1,
-            });
-          }
-          skipped++;
-          progress.skippedRecords++;
-          continue;
-        }
-
-        // Check for existing session (deduplicate)
-        if (existingSessionIds.has(activity.Id)) {
-          skipped++;
-          progress.skippedRecords++;
-          continue;
-        }
-
-        // Get GeoIP data (cached)
-        const ipAddress = activity.RemoteEndPoint ?? '0.0.0.0';
-        let geo = geoCache.get(ipAddress);
-        if (!geo) {
-          geo = geoipService.lookup(ipAddress);
-          geoCache.set(ipAddress, geo);
-        }
-
-        // Get enrichment data if available
-        const enrichment = enrichmentMap.get(activity.NowPlayingItemId);
-
-        // Transform and add to batch
-        const sessionData = transformActivityToSession(
-          activity,
-          serverId,
-          serverUserId,
-          geo,
-          enrichment
+      if (chunkIds.length > 0) {
+        const existingSessions = await db
+          .select({ externalSessionId: sessions.externalSessionId })
+          .from(sessions)
+          .where(
+            and(
+              eq(sessions.serverId, serverId),
+              inArray(sessions.externalSessionId, chunkIds)
+            )
+          );
+        existingInChunk = new Set(
+          existingSessions.map((s) => s.externalSessionId).filter((id): id is string => id != null)
         );
-        insertBatch.push(sessionData);
-
-        // Add to existing set to prevent duplicates within same import
-        existingSessionIds.add(activity.Id);
-
-        imported++;
-        progress.importedRecords++;
-
-        // Flush batch when full
-        if (insertBatch.length >= BATCH_SIZE) {
-          await flushBatch();
-        }
-      } catch (error) {
-        console.error('[Jellystat] Error processing record:', activity.Id, error);
-        errors++;
-        progress.errorRecords++;
       }
 
-      // Throttled progress updates
-      const now = Date.now();
-      if (
-        progress.processedRecords % PROGRESS_RECORD_INTERVAL === 0 ||
-        now - lastProgressTime > PROGRESS_THROTTLE_MS
-      ) {
-        progress.message = `Processing: ${progress.processedRecords}/${progress.totalRecords}`;
-        publishProgress();
-        lastProgressTime = now;
+      // Process chunk records
+      const insertBatch: (typeof sessions.$inferInsert)[] = [];
+
+      for (const activity of chunk) {
+        progress.processedRecords++;
+
+        try {
+          // Find server user by Jellyfin GUID
+          const serverUserId = userMap.get(activity.UserId);
+          if (!serverUserId) {
+            // User not found - track for warning
+            const existing = skippedUsers.get(activity.UserId);
+            if (existing) {
+              existing.count++;
+            } else {
+              skippedUsers.set(activity.UserId, {
+                username: activity.UserName ?? null,
+                count: 1,
+              });
+            }
+            skipped++;
+            progress.skippedRecords++;
+            continue;
+          }
+
+          // Check for existing session (deduplicate)
+          if (existingInChunk.has(activity.Id) || insertedInThisImport.has(activity.Id)) {
+            skipped++;
+            progress.skippedRecords++;
+            continue;
+          }
+
+          // Get GeoIP data (cached)
+          const ipAddress = activity.RemoteEndPoint ?? '0.0.0.0';
+          let geo = geoCache.get(ipAddress);
+          if (!geo) {
+            geo = geoipService.lookup(ipAddress);
+            geoCache.set(ipAddress, geo);
+          }
+
+          // Get enrichment data if available
+          const enrichment = enrichmentMap.get(activity.NowPlayingItemId);
+
+          // Transform and add to batch
+          const sessionData = transformActivityToSession(
+            activity,
+            serverId,
+            serverUserId,
+            geo,
+            enrichment
+          );
+          insertBatch.push(sessionData);
+
+          // Track to prevent duplicates within same import
+          insertedInThisImport.add(activity.Id);
+
+          imported++;
+          progress.importedRecords++;
+        } catch (error) {
+          console.error('[Jellystat] Error processing record:', activity.Id, error);
+          errors++;
+          progress.errorRecords++;
+        }
+
+        // Throttled progress updates
+        const now = Date.now();
+        if (
+          progress.processedRecords % PROGRESS_RECORD_INTERVAL === 0 ||
+          now - lastProgressTime > PROGRESS_THROTTLE_MS
+        ) {
+          progress.message = `Processing: ${progress.processedRecords}/${progress.totalRecords}`;
+          publishProgress();
+          lastProgressTime = now;
+        }
+      }
+
+      // Flush chunk batch - insert in sub-batches for very large chunks
+      if (insertBatch.length > 0) {
+        for (let i = 0; i < insertBatch.length; i += BATCH_SIZE) {
+          const subBatch = insertBatch.slice(i, i + BATCH_SIZE);
+          await db.insert(sessions).values(subBatch);
+        }
       }
     }
-
-    // Final flush
-    await flushBatch();
 
     // Refresh TimescaleDB aggregates
     progress.message = 'Refreshing aggregates...';
@@ -476,8 +484,15 @@ export async function importJellystatBackup(
     }
 
     if (skippedUsers.size > 0) {
-      const totalSkippedRecords = [...skippedUsers.values()].reduce((sum, u) => sum + u.count, 0);
-      message += `. Warning: ${totalSkippedRecords} records skipped - ${skippedUsers.size} users from backup not found in Tracearr. Sync your server first to import their history.`;
+      // List top 5 skipped users sorted by count (most skipped first)
+      const skippedUserList = [...skippedUsers.values()]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+        .map((u) => `${u.username ?? 'Unknown'} (${u.count} records)`)
+        .join(', ');
+
+      const moreUsers = skippedUsers.size > 5 ? ` and ${skippedUsers.size - 5} more` : '';
+      message += `. Warning: ${skippedUsers.size} users not found in Tracearr: ${skippedUserList}${moreUsers}. Sync your server first to import their history.`;
 
       console.warn(
         `[Jellystat] Import skipped users: ${[...skippedUsers.entries()].map(([id, data]) => `${data.username}(${id})`).join(', ')}`

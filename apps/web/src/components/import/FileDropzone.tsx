@@ -1,0 +1,167 @@
+import { useCallback, useRef, useState } from 'react';
+import { FileJson, Upload, X } from 'lucide-react';
+import { Button } from '../ui/button';
+import { cn } from '@/lib/utils';
+
+interface FileDropzoneProps {
+  accept?: string;
+  maxSize?: number; // in bytes
+  onFileSelect: (file: File | null) => void;
+  selectedFile: File | null;
+  disabled?: boolean;
+  error?: string | null;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export function FileDropzone({
+  accept = '.json',
+  maxSize = 100 * 1024 * 1024, // 100MB default
+  onFileSelect,
+  selectedFile,
+  disabled = false,
+  error,
+}: FileDropzoneProps) {
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (!disabled) {
+      setIsDragging(true);
+    }
+  }, [disabled]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const validateAndSelect = useCallback((file: File) => {
+    // Validate extension
+    const extensions = accept.split(',').map(ext => ext.trim().toLowerCase());
+    const fileExt = `.${file.name.split('.').pop()?.toLowerCase()}`;
+
+    if (!extensions.includes(fileExt) && !extensions.includes('*')) {
+      onFileSelect(null);
+      return;
+    }
+
+    // Validate size
+    if (file.size > maxSize) {
+      onFileSelect(null);
+      return;
+    }
+
+    onFileSelect(file);
+  }, [accept, maxSize, onFileSelect]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    if (disabled) return;
+
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      validateAndSelect(file);
+    }
+  }, [disabled, validateAndSelect]);
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      validateAndSelect(file);
+    }
+  }, [validateAndSelect]);
+
+  const handleRemoveFile = useCallback(() => {
+    onFileSelect(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [onFileSelect]);
+
+  const handleClick = useCallback(() => {
+    if (!disabled) {
+      fileInputRef.current?.click();
+    }
+  }, [disabled]);
+
+  return (
+    <div className="space-y-2">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={accept}
+        onChange={handleFileChange}
+        className="hidden"
+        disabled={disabled}
+      />
+
+      {!selectedFile ? (
+        <div
+          onClick={handleClick}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={cn(
+            'flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer',
+            isDragging && 'border-primary bg-primary/5',
+            !isDragging && 'border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/50',
+            disabled && 'opacity-50 cursor-not-allowed',
+            error && 'border-destructive'
+          )}
+        >
+          <div className={cn(
+            'rounded-full p-3',
+            isDragging ? 'bg-primary/10' : 'bg-muted'
+          )}>
+            <Upload className={cn(
+              'h-6 w-6',
+              isDragging ? 'text-primary' : 'text-muted-foreground'
+            )} />
+          </div>
+          <div className="text-center">
+            <p className="font-medium">
+              {isDragging ? 'Drop file here' : 'Drag & drop or click to select'}
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {accept} files up to {formatFileSize(maxSize)}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-lg border p-3 bg-muted/30">
+          <div className="rounded-lg bg-primary/10 p-2">
+            <FileJson className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium truncate">{selectedFile.name}</p>
+            <p className="text-sm text-muted-foreground">
+              {formatFileSize(selectedFile.size)}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRemoveFile}
+            disabled={disabled}
+            className="shrink-0"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Remove file</span>
+          </Button>
+        </div>
+      )}
+
+      {error && (
+        <p className="text-sm text-destructive">{error}</p>
+      )}
+    </div>
+  );
+}

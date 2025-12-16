@@ -2054,7 +2054,7 @@ describe('importJellystatBackup', () => {
       const result = await importJellystatBackup(serverId, backup, false);
 
       expect(result.message).toContain('Warning');
-      expect(result.message).toContain('users not found');
+      expect(result.message).toContain('users not found in Tracearr');
       expect(result.message).toContain('Sync your server');
     });
 
@@ -2086,9 +2086,9 @@ describe('importJellystatBackup', () => {
       });
       (db.insert as ReturnType<typeof vi.fn>).mockReturnValue({ values: mockValues });
 
-      // Generate 105 records to trigger batch flush (BATCH_SIZE = 100)
+      // Generate 600 records to trigger batch flush (BATCH_SIZE = 500)
       const activities = [];
-      for (let i = 0; i < 105; i++) {
+      for (let i = 0; i < 600; i++) {
         activities.push({
           ...REAL_BACKUP_ACTIVITY_1,
           Id: `record-${i}`,
@@ -2102,8 +2102,8 @@ describe('importJellystatBackup', () => {
       const result = await importJellystatBackup(serverId, backup, false);
 
       expect(result.success).toBe(true);
-      expect(result.imported).toBe(105);
-      // Should have triggered at least 2 insert calls (100 + 5)
+      expect(result.imported).toBe(600);
+      // Should have triggered at least 2 insert calls (500 + 100)
       expect(insertedBatches.length).toBeGreaterThanOrEqual(2);
     });
 
