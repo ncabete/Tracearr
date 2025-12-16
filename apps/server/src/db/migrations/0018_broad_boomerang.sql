@@ -1,1 +1,0 @@
-ALTER TABLE "server_users" ADD COLUMN "joined_at" timestamp with time zone;
