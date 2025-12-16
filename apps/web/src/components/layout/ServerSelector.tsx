@@ -10,9 +10,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
 
 export function ServerSelector() {
-  const { servers, selectedServerId, selectServer, isLoading } = useServer();
+  const { servers, selectedServerId, selectServer, isLoading, isFetching } = useServer();
 
-  if (isLoading) {
+  // Show skeleton while loading initially or refetching with no cached data
+  if (isLoading || (servers.length === 0 && isFetching)) {
     return (
       <div className="px-4 py-2">
         <Skeleton className="h-9 w-full" />
@@ -20,6 +21,7 @@ export function ServerSelector() {
     );
   }
 
+  // No servers available
   if (servers.length === 0) {
     return null;
   }
@@ -35,18 +37,11 @@ export function ServerSelector() {
     );
   }
 
-  const selectedServer = servers.find((s) => s.id === selectedServerId);
-
   return (
     <div className="px-4 py-2">
       <Select value={selectedServerId ?? undefined} onValueChange={selectServer}>
         <SelectTrigger className="h-9 w-full">
-          <div className="flex items-center gap-2">
-            {selectedServer ? (
-              <MediaServerIcon type={selectedServer.type} className="h-4 w-4 shrink-0" />
-            ) : null}
-            <SelectValue placeholder="Select server" />
-          </div>
+          <SelectValue placeholder="Select server" />
         </SelectTrigger>
         <SelectContent>
           {servers.map((server) => (

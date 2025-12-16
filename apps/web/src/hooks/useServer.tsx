@@ -20,6 +20,7 @@ interface ServerContextValue {
   selectedServer: Server | null;
   selectedServerId: string | null;
   isLoading: boolean;
+  isFetching: boolean;
   selectServer: (serverId: string) => void;
   refetch: () => Promise<unknown>;
 }
@@ -38,6 +39,7 @@ export function ServerProvider({ children }: { children: ReactNode }) {
   const {
     data: servers = [],
     isLoading,
+    isFetching,
     refetch,
   } = useQuery({
     queryKey: ['servers'],
@@ -115,10 +117,11 @@ export function ServerProvider({ children }: { children: ReactNode }) {
       selectedServer,
       selectedServerId,
       isLoading,
+      isFetching,
       selectServer,
       refetch,
     }),
-    [accessibleServers, selectedServer, selectedServerId, isLoading, selectServer, refetch]
+    [accessibleServers, selectedServer, selectedServerId, isLoading, isFetching, selectServer, refetch]
   );
 
   return <ServerContext.Provider value={value}>{children}</ServerContext.Provider>;
