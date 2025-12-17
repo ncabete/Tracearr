@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { updateSettingsSchema, type Settings } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { settings } from '../db/schema.js';
+import { sendTestWebhook } from '../services/notify.js';
 
 // Default settings row ID (singleton pattern)
 const SETTINGS_ID = 1;
@@ -56,6 +57,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
             customWebhookUrl: settings.customWebhookUrl,
             webhookFormat: settings.webhookFormat,
             ntfyTopic: settings.ntfyTopic,
+            ntfyAuthToken: settings.ntfyAuthToken,
             pollerEnabled: settings.pollerEnabled,
             pollerIntervalMs: settings.pollerIntervalMs,
             tautulliUrl: settings.tautulliUrl,
@@ -110,6 +112,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         customWebhookUrl: row.customWebhookUrl,
         webhookFormat: row.webhookFormat,
         ntfyTopic: row.ntfyTopic,
+        ntfyAuthToken: row.ntfyAuthToken ? '********' : null, // Mask auth token
         pollerEnabled: row.pollerEnabled,
         pollerIntervalMs: row.pollerIntervalMs,
         tautulliUrl: row.tautulliUrl,
@@ -152,6 +155,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         customWebhookUrl: string | null;
         webhookFormat: 'json' | 'ntfy' | 'apprise' | null;
         ntfyTopic: string | null;
+        ntfyAuthToken: string | null;
         pollerEnabled: boolean;
         pollerIntervalMs: number;
         tautulliUrl: string | null;
@@ -187,6 +191,10 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
       if (body.data.ntfyTopic !== undefined) {
         updateData.ntfyTopic = body.data.ntfyTopic;
+      }
+
+      if (body.data.ntfyAuthToken !== undefined) {
+        updateData.ntfyAuthToken = body.data.ntfyAuthToken;
       }
 
       if (body.data.pollerEnabled !== undefined) {
@@ -246,6 +254,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
           customWebhookUrl: updateData.customWebhookUrl ?? null,
           webhookFormat: updateData.webhookFormat ?? null,
           ntfyTopic: updateData.ntfyTopic ?? null,
+          ntfyAuthToken: updateData.ntfyAuthToken ?? null,
           pollerEnabled: updateData.pollerEnabled ?? true,
           pollerIntervalMs: updateData.pollerIntervalMs ?? 15000,
           tautulliUrl: updateData.tautulliUrl ?? null,
@@ -288,6 +297,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         customWebhookUrl: row.customWebhookUrl,
         webhookFormat: row.webhookFormat,
         ntfyTopic: row.ntfyTopic,
+        ntfyAuthToken: row.ntfyAuthToken ? '********' : null, // Mask auth token
         pollerEnabled: row.pollerEnabled,
         pollerIntervalMs: row.pollerIntervalMs,
         tautulliUrl: row.tautulliUrl,
@@ -300,6 +310,74 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       };
 
       return result;
+    }
+  );
+
+  /**
+   * POST /settings/test-webhook - Send a test notification to verify webhook configuration
+   */
+  app.post<{
+    Body: {
+      type: 'discord' | 'custom';
+      url?: string;
+      format?: 'json' | 'ntfy' | 'apprise';
+      ntfyTopic?: string;
+      ntfyAuthToken?: string;
+    };
+  }>(
+    '/test-webhook',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const authUser = request.user;
+
+      // Only owners can test webhooks
+      if (authUser.role !== 'owner') {
+        return reply.forbidden('Only server owners can test webhooks');
+      }
+
+      const { type, url, format, ntfyTopic, ntfyAuthToken } = request.body;
+
+      if (!type) {
+        return reply.badRequest('Missing webhook type');
+      }
+
+      // Get current settings to find the URL if not provided
+      const settingsRow = await db
+        .select()
+        .from(settings)
+        .where(eq(settings.id, SETTINGS_ID))
+        .limit(1);
+
+      const currentSettings = settingsRow[0];
+
+      let webhookUrl: string | null = null;
+      let webhookFormat: 'json' | 'ntfy' | 'apprise' = 'json';
+      let topic: string | null = null;
+      let authToken: string | null = null;
+
+      if (type === 'discord') {
+        webhookUrl = url ?? currentSettings?.discordWebhookUrl ?? null;
+      } else {
+        webhookUrl = url ?? currentSettings?.customWebhookUrl ?? null;
+        webhookFormat = format ?? currentSettings?.webhookFormat ?? 'json';
+        topic = ntfyTopic ?? currentSettings?.ntfyTopic ?? null;
+        authToken = ntfyAuthToken ?? currentSettings?.ntfyAuthToken ?? null;
+      }
+
+      if (!webhookUrl) {
+        return reply.badRequest(`No ${type} webhook URL configured`);
+      }
+
+      const result = await sendTestWebhook(webhookUrl, type, webhookFormat, topic, authToken);
+
+      if (!result.success) {
+        return reply.code(502).send({
+          success: false,
+          error: result.error ?? 'Webhook test failed',
+        });
+      }
+
+      return { success: true };
     }
   );
 };
@@ -368,6 +446,7 @@ export interface NotificationSettings {
   customWebhookUrl: string | null;
   webhookFormat: 'json' | 'ntfy' | 'apprise' | null;
   ntfyTopic: string | null;
+  ntfyAuthToken: string | null;
   webhookSecret: string | null;
   mobileEnabled: boolean;
   unitSystem: 'metric' | 'imperial';
@@ -383,6 +462,7 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
       customWebhookUrl: settings.customWebhookUrl,
       webhookFormat: settings.webhookFormat,
       ntfyTopic: settings.ntfyTopic,
+      ntfyAuthToken: settings.ntfyAuthToken,
       mobileEnabled: settings.mobileEnabled,
       unitSystem: settings.unitSystem,
     })
@@ -398,6 +478,7 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
       customWebhookUrl: null,
       webhookFormat: null,
       ntfyTopic: null,
+      ntfyAuthToken: null,
       webhookSecret: null,
       mobileEnabled: false,
       unitSystem: 'metric',
@@ -409,6 +490,7 @@ export async function getNotificationSettings(): Promise<NotificationSettings> {
     customWebhookUrl: settingsRow.customWebhookUrl,
     webhookFormat: settingsRow.webhookFormat,
     ntfyTopic: settingsRow.ntfyTopic,
+    ntfyAuthToken: settingsRow.ntfyAuthToken,
     webhookSecret: null, // TODO: Add webhookSecret column to settings table in Phase 4
     mobileEnabled: settingsRow.mobileEnabled,
     unitSystem: settingsRow.unitSystem,

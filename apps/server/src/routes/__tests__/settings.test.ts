@@ -87,6 +87,7 @@ const mockSettingsRow = {
   customWebhookUrl: 'https://example.com/webhook',
   webhookFormat: 'json' as const,
   ntfyTopic: null,
+  ntfyAuthToken: null,
   pollerEnabled: true,
   pollerIntervalMs: 15000,
   tautulliUrl: 'http://localhost:8181',
@@ -693,6 +694,123 @@ describe('Settings Routes', () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.ntfyTopic).toBe(null);
+    });
+
+    it('updates ntfy auth token', async () => {
+      app = await buildTestApp(ownerUser);
+
+      let selectCount = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCount++;
+        const chain = {
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockResolvedValue(
+            selectCount === 1
+              ? [mockSettingsRow]
+              : [{
+                  ...mockSettingsRow,
+                  webhookFormat: 'ntfy',
+                  ntfyTopic: 'tracearr',
+                  ntfyAuthToken: 'tk_secret_token_123',
+                }]
+          ),
+        };
+        return chain as never;
+      });
+      mockDbUpdate();
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: {
+          webhookFormat: 'ntfy',
+          ntfyTopic: 'tracearr',
+          ntfyAuthToken: 'tk_secret_token_123',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.webhookFormat).toBe('ntfy');
+      expect(body.ntfyTopic).toBe('tracearr');
+      // Auth token should be masked in response
+      expect(body.ntfyAuthToken).toBe('********');
+    });
+
+    it('masks ntfy auth token in GET response', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectLimit([{
+        ...mockSettingsRow,
+        webhookFormat: 'ntfy',
+        ntfyTopic: 'my-topic',
+        ntfyAuthToken: 'tk_secret_token_456',
+      }]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/settings',
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.ntfyAuthToken).toBe('********');
+    });
+
+    it('returns null for ntfy auth token when not set', async () => {
+      app = await buildTestApp(ownerUser);
+
+      mockDbSelectLimit([{
+        ...mockSettingsRow,
+        webhookFormat: 'ntfy',
+        ntfyTopic: 'my-topic',
+        ntfyAuthToken: null,
+      }]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/settings',
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.ntfyAuthToken).toBe(null);
+    });
+
+    it('clears ntfy auth token when set to null', async () => {
+      app = await buildTestApp(ownerUser);
+
+      let selectCount = 0;
+      vi.mocked(db.select).mockImplementation(() => {
+        selectCount++;
+        const chain = {
+          from: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockResolvedValue(
+            selectCount === 1
+              ? [{ ...mockSettingsRow, ntfyAuthToken: 'tk_old_token' }]
+              : [{
+                  ...mockSettingsRow,
+                  ntfyAuthToken: null,
+                }]
+          ),
+        };
+        return chain as never;
+      });
+      mockDbUpdate();
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/settings',
+        payload: {
+          ntfyAuthToken: null,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.ntfyAuthToken).toBe(null);
     });
   });
 });

@@ -45,6 +45,14 @@ function severityToAppriseType(severity: string): 'info' | 'success' | 'warning'
   return map[severity] ?? 'info';
 }
 
+/**
+ * Truncate a string to fit Discord's field value limit (1024 chars)
+ */
+function truncateForDiscord(text: string, maxLength = 1000): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength - 3) + '...';
+}
+
 export class NotificationService {
   /**
    * Send violation notification
@@ -175,6 +183,8 @@ export class NotificationService {
     const ruleType = violation.rule.type as keyof typeof RULE_DISPLAY_NAMES;
     const severity = violation.severity as keyof typeof SEVERITY_LEVELS;
 
+    const detailsJson = JSON.stringify(violation.data, null, 2);
+
     await this.sendDiscordMessage(webhookUrl, {
       title: `Sharing Violation Detected`,
       color: severityColors[severity] ?? 0x3498db,
@@ -182,7 +192,7 @@ export class NotificationService {
         { name: 'User', value: violation.user.username, inline: true },
         { name: 'Rule', value: RULE_DISPLAY_NAMES[ruleType], inline: true },
         { name: 'Severity', value: SEVERITY_LEVELS[severity].label, inline: true },
-        { name: 'Details', value: JSON.stringify(violation.data, null, 2) },
+        { name: 'Details', value: truncateForDiscord(detailsJson) },
       ],
     });
   }
@@ -195,6 +205,7 @@ export class NotificationService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        username: 'Tracearr',
         embeds: [
           {
             ...embed,
@@ -239,7 +250,9 @@ export class NotificationService {
         payload = rawPayload;
     }
 
-    await this.sendWebhook(settings.customWebhookUrl, payload);
+    // Pass ntfy auth token for ntfy format
+    const authToken = format === 'ntfy' ? settings.ntfyAuthToken : null;
+    await this.sendWebhook(settings.customWebhookUrl, payload, authToken);
   }
 
   /**
@@ -386,16 +399,125 @@ export class NotificationService {
     };
   }
 
-  private async sendWebhook(webhookUrl: string, payload: unknown): Promise<void> {
+  private async sendWebhook(webhookUrl: string, payload: unknown, authToken?: string | null): Promise<void> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+    // Add authorization header for ntfy servers with token auth
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+
     const response = await fetch(webhookUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
       throw new Error(`Webhook failed: ${response.status}`);
     }
+  }
+}
+
+/**
+ * Send a test notification to verify webhook configuration
+ */
+export async function sendTestWebhook(
+  webhookUrl: string,
+  type: 'discord' | 'custom',
+  format: 'json' | 'ntfy' | 'apprise' = 'json',
+  ntfyTopic?: string | null,
+  ntfyAuthToken?: string | null
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (type === 'discord') {
+      // Send Discord test embed
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: 'Tracearr',
+          embeds: [
+            {
+              title: 'Test Notification',
+              description: 'If you see this message, your Discord webhook is configured correctly!',
+              color: 0x2ecc71, // Green
+              fields: [
+                { name: 'Status', value: 'Connected', inline: true },
+                { name: 'Source', value: 'Tracearr', inline: true },
+              ],
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        return { success: false, error: `Discord returned ${response.status}: ${text}` };
+      }
+
+      return { success: true };
+    }
+
+    // Custom webhook
+    let payload: unknown;
+
+    switch (format) {
+      case 'ntfy':
+        payload = {
+          topic: ntfyTopic || 'tracearr',
+          title: 'Test Notification',
+          message: 'If you see this message, your ntfy webhook is configured correctly!',
+          priority: 3,
+          tags: ['white_check_mark', 'tracearr'],
+        };
+        break;
+
+      case 'apprise':
+        payload = {
+          title: 'Test Notification',
+          body: 'If you see this message, your Apprise webhook is configured correctly!',
+          type: 'success',
+        };
+        break;
+
+      case 'json':
+      default:
+        payload = {
+          event: 'test',
+          timestamp: new Date().toISOString(),
+          message: 'If you see this message, your webhook is configured correctly!',
+          data: {
+            source: 'tracearr',
+            test: true,
+          },
+        };
+    }
+
+    // Build headers with optional auth token for ntfy
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (format === 'ntfy' && ntfyAuthToken) {
+      headers['Authorization'] = `Bearer ${ntfyAuthToken}`;
+    }
+
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { success: false, error: `Webhook returned ${response.status}: ${text}` };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
 }
 

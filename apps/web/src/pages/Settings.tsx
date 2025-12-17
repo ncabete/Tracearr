@@ -670,22 +670,75 @@ function NotificationSettings() {
   const updateSettings = useUpdateSettings();
   const [webhookFormat, setWebhookFormat] = useState<string>('json');
   const [ntfyTopic, setNtfyTopic] = useState<string>('');
+  const [ntfyAuthToken, setNtfyAuthToken] = useState<string>('');
+  const [testingDiscord, setTestingDiscord] = useState(false);
+  const [testingCustom, setTestingCustom] = useState(false);
 
   // Sync state with loaded settings
   useEffect(() => {
     if (settings) {
       setWebhookFormat(settings.webhookFormat ?? 'json');
       setNtfyTopic(settings.ntfyTopic ?? '');
+      // Don't overwrite if already set (masked token from server shows as ********)
+      if (!ntfyAuthToken) {
+        setNtfyAuthToken('');
+      }
     }
-  }, [settings]);
+  }, [settings, ntfyAuthToken]);
 
   const handleUrlChange = (key: 'discordWebhookUrl' | 'customWebhookUrl' | 'ntfyTopic', value: string) => {
     updateSettings.mutate({ [key]: value || null });
   };
 
+  const handleNtfyAuthTokenSave = () => {
+    // Only save if the user entered a new token (not empty and not the masked placeholder)
+    if (ntfyAuthToken && ntfyAuthToken !== '********') {
+      updateSettings.mutate({ ntfyAuthToken: ntfyAuthToken || null });
+    }
+  };
+
+  const handleClearNtfyAuthToken = () => {
+    setNtfyAuthToken('');
+    updateSettings.mutate({ ntfyAuthToken: null });
+  };
+
   const handleWebhookFormatChange = (value: string) => {
     setWebhookFormat(value);
     updateSettings.mutate({ webhookFormat: value as 'json' | 'ntfy' | 'apprise' });
+  };
+
+  const handleTestDiscord = async () => {
+    setTestingDiscord(true);
+    try {
+      await api.settings.testWebhook({ type: 'discord' });
+      toast.success('Test Sent', { description: 'Check your Discord channel for the test message.' });
+    } catch (err) {
+      toast.error('Test Failed', {
+        description: err instanceof Error ? err.message : 'Failed to send test webhook',
+      });
+    } finally {
+      setTestingDiscord(false);
+    }
+  };
+
+  const handleTestCustom = async () => {
+    setTestingCustom(true);
+    try {
+      await api.settings.testWebhook({
+        type: 'custom',
+        format: webhookFormat as 'json' | 'ntfy' | 'apprise',
+        ntfyTopic: ntfyTopic || undefined,
+        // Pass auth token if user entered a new one (not empty and not the placeholder)
+        ntfyAuthToken: ntfyAuthToken && ntfyAuthToken !== '********' ? ntfyAuthToken : undefined,
+      });
+      toast.success('Test Sent', { description: 'Check your webhook endpoint for the test message.' });
+    } catch (err) {
+      toast.error('Test Failed', {
+        description: err instanceof Error ? err.message : 'Failed to send test webhook',
+      });
+    } finally {
+      setTestingCustom(false);
+    }
   };
 
   if (isLoading) {
@@ -736,12 +789,25 @@ function NotificationSettings() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="discordWebhook">Discord Webhook URL</Label>
-            <Input
-              id="discordWebhook"
-              placeholder="https://discord.com/api/webhooks/..."
-              defaultValue={settings?.discordWebhookUrl ?? ''}
-              onBlur={(e) => { handleUrlChange('discordWebhookUrl', e.target.value); }}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="discordWebhook"
+                placeholder="https://discord.com/api/webhooks/..."
+                defaultValue={settings?.discordWebhookUrl ?? ''}
+                onBlur={(e) => { handleUrlChange('discordWebhookUrl', e.target.value); }}
+              />
+              <Button
+                variant="outline"
+                onClick={handleTestDiscord}
+                disabled={!settings?.discordWebhookUrl || testingDiscord}
+              >
+                {testingDiscord ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Test'
+                )}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               Paste your Discord webhook URL to receive notifications in a Discord channel
             </p>
@@ -749,18 +815,31 @@ function NotificationSettings() {
 
           <div className="space-y-2">
             <Label htmlFor="customWebhook">Custom Webhook URL</Label>
-            <Input
-              id="customWebhook"
-              placeholder={
-                webhookFormat === 'ntfy'
-                  ? 'https://ntfy.sh/ (or your self-hosted ntfy server)'
-                  : webhookFormat === 'apprise'
-                    ? 'http://apprise:8000/notify/myconfig'
-                    : 'https://your-service.com/webhook'
-              }
-              defaultValue={settings?.customWebhookUrl ?? ''}
-              onBlur={(e) => { handleUrlChange('customWebhookUrl', e.target.value); }}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="customWebhook"
+                placeholder={
+                  webhookFormat === 'ntfy'
+                    ? 'https://ntfy.sh/ (or your self-hosted ntfy server)'
+                    : webhookFormat === 'apprise'
+                      ? 'http://apprise:8000/notify/myconfig'
+                      : 'https://your-service.com/webhook'
+                }
+                defaultValue={settings?.customWebhookUrl ?? ''}
+                onBlur={(e) => { handleUrlChange('customWebhookUrl', e.target.value); }}
+              />
+              <Button
+                variant="outline"
+                onClick={handleTestCustom}
+                disabled={!settings?.customWebhookUrl || testingCustom}
+              >
+                {testingCustom ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Test'
+                )}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               {webhookFormat === 'ntfy'
                 ? 'Post to your ntfy server root URL (topic is specified separately below)'
@@ -788,19 +867,47 @@ function NotificationSettings() {
           </div>
 
           {webhookFormat === 'ntfy' && (
-            <div className="space-y-2">
-              <Label htmlFor="ntfyTopic">Ntfy Topic</Label>
-              <Input
-                id="ntfyTopic"
-                placeholder="tracearr"
-                value={ntfyTopic}
-                onChange={(e) => setNtfyTopic(e.target.value)}
-                onBlur={(e) => { handleUrlChange('ntfyTopic', e.target.value); }}
-              />
-              <p className="text-xs text-muted-foreground">
-                The ntfy topic to publish notifications to
-              </p>
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="ntfyTopic">Ntfy Topic</Label>
+                <Input
+                  id="ntfyTopic"
+                  placeholder="tracearr"
+                  value={ntfyTopic}
+                  onChange={(e) => setNtfyTopic(e.target.value)}
+                  onBlur={(e) => { handleUrlChange('ntfyTopic', e.target.value); }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  The ntfy topic to publish notifications to
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="ntfyAuthToken">Auth Token (optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="ntfyAuthToken"
+                    type="password"
+                    placeholder={settings?.ntfyAuthToken ? '••••••••' : 'tk_...'}
+                    value={ntfyAuthToken}
+                    onChange={(e) => setNtfyAuthToken(e.target.value)}
+                    onBlur={handleNtfyAuthTokenSave}
+                  />
+                  {settings?.ntfyAuthToken && (
+                    <Button
+                      variant="outline"
+                      onClick={handleClearNtfyAuthToken}
+                      title="Clear auth token"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Required for protected ntfy servers. Enter your access token (starts with tk_).
+                </p>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
