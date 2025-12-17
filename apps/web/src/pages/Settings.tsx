@@ -53,6 +53,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { PlexServerSelector } from '@/components/auth/PlexServerSelector';
 import { NotificationRoutingMatrix } from '@/components/settings/NotificationRoutingMatrix';
+import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 import type { Server, Settings as SettingsType, TautulliImportProgress, MobileSession, MobileQRPayload } from '@tracearr/shared';
 import {
   useSettings,
@@ -71,11 +72,12 @@ import {
 function SettingsNav() {
   const links = [
     { href: '/settings', label: 'General', end: true },
+    { href: '/settings/appearance', label: 'Appearance' },
     { href: '/settings/servers', label: 'Servers' },
-    { href: '/settings/network', label: 'Network' },
     { href: '/settings/notifications', label: 'Notifications' },
     { href: '/settings/access', label: 'Access Control' },
     { href: '/settings/mobile', label: 'Mobile' },
+    { href: '/settings/network', label: 'Network' },
     { href: '/settings/import', label: 'Import' },
   ];
 
@@ -2007,6 +2009,7 @@ export function Settings() {
       <SettingsNav />
       <Routes>
         <Route index element={<GeneralSettings />} />
+        <Route path="appearance" element={<AppearanceSettings />} />
         <Route path="servers" element={<ServerSettings />} />
         <Route path="network" element={<NetworkSettings />} />
         <Route path="notifications" element={<NotificationSettings />} />

@@ -105,102 +105,106 @@
 
 /* CSS Variables for both light and dark modes */
 :root {
-  /* Brand Colors - Tracearr */
-  --cyan-core: 187 80% 50%;     /* #18D1E7 - Primary accent */
-  --cyan-deep: 187 86% 42%;     /* #0EAFC8 - Hover/gradients */
-  --cyan-dark: 190 85% 31%;     /* #0A7C96 - Shadows/outlines */
+  /* Accent Hue - Customizable via ThemeProvider */
+  /* Default: 187 (Cyan). Other options: 220 (Blue), 270 (Purple), 330 (Pink), 0 (Red), 24 (Orange), 150 (Green) */
+  --accent-hue: 187;
+
+  /* Brand Colors - Tracearr (derived from accent hue) */
+  --cyan-core: var(--accent-hue) 80% 50%;     /* Primary accent */
+  --cyan-deep: var(--accent-hue) 86% 42%;     /* Hover/gradients */
+  --cyan-dark: var(--accent-hue) 85% 31%;     /* Shadows/outlines */
   --blue-core: 213 62% 11%;     /* #0B1A2E - Dark background */
   --blue-steel: 213 47% 17%;    /* #162840 - Panels/cards */
   --blue-soft: 212 49% 24%;     /* #1E3A5C - Hover/selection */
 
-  /* Light Mode - Clean, professional with cyan accents */
-  --background: 210 25% 97%;    /* #F5F7FA - Slightly cooler than pure white */
-  --foreground: 213 62% 11%;    /* Blue Core - primary text */
-  --card: 0 0% 100%;            /* Pure white cards */
-  --card-foreground: 213 62% 11%;
+  /* Light Mode - shadcn neutral backgrounds with accent primary */
+  --background: 0 0% 100%;                    /* Pure white */
+  --foreground: 240 10% 4%;                   /* Near black text */
+  --card: 0 0% 100%;                          /* Pure white cards */
+  --card-foreground: 240 10% 4%;
   --popover: 0 0% 100%;
-  --popover-foreground: 213 62% 11%;
-  --primary: 187 85% 38%;       /* #0A98AD - Darker cyan for light mode readability */
-  --primary-foreground: 0 0% 100%;  /* White text on primary buttons */
-  --secondary: 210 25% 93%;     /* #E8ECF1 - Subtle blue-gray */
-  --secondary-foreground: 213 50% 25%;
-  --muted: 210 20% 94%;         /* #EBEEF2 */
-  --muted-foreground: 213 25% 45%; /* #5A6A7A */
-  --accent: 210 25% 93%;        /* Same as secondary for hover states */
-  --accent-foreground: 213 62% 11%;
-  --destructive: 0 72% 51%;     /* #DC2626 */
+  --popover-foreground: 240 10% 4%;
+  --primary: var(--accent-hue) 85% 38%;       /* Accent color */
+  --primary-foreground: 0 0% 100%;            /* White text on primary */
+  --secondary: 240 5% 96%;                    /* Neutral gray */
+  --secondary-foreground: 240 6% 10%;
+  --muted: 240 5% 96%;                        /* Neutral gray */
+  --muted-foreground: 240 4% 46%;
+  --accent: 240 5% 96%;                       /* Neutral gray for hover */
+  --accent-foreground: 240 6% 10%;
+  --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
-  --border: 214 20% 85%;        /* #CED4DC - Visible but subtle */
-  --input: 214 20% 85%;
-  --ring: 187 85% 38%;          /* Darker cyan for focus rings */
+  --border: 240 6% 90%;                       /* Neutral border */
+  --input: 240 6% 90%;
+  --ring: var(--accent-hue) 85% 38%;          /* Accent color for focus */
   --radius: 0.5rem;
 
   /* Chart Colors - Light Mode */
-  --chart-1: 187 85% 38%;       /* Darker cyan */
-  --chart-2: 187 90% 30%;       /* Even darker cyan */
-  --chart-3: 213 62% 20%;       /* Blue Core lighter */
-  --chart-4: 43 90% 45%;        /* Amber */
-  --chart-5: 0 72% 51%;         /* Red */
+  --chart-1: var(--accent-hue) 85% 38%;       /* Accent */
+  --chart-2: var(--accent-hue) 70% 50%;       /* Accent variant */
+  --chart-3: 197 37% 24%;                     /* Neutral dark */
+  --chart-4: 43 90% 45%;                      /* Amber */
+  --chart-5: 0 72% 51%;                       /* Red */
 
   /* Icon Colors - Light Mode */
-  --icon-default: 213 20% 55%;  /* #778899 */
-  --icon-active: 187 85% 38%;   /* Darker cyan */
-  --icon-danger: 0 72% 51%;     /* #DC2626 */
+  --icon-default: 240 4% 46%;                 /* Neutral */
+  --icon-active: var(--accent-hue) 85% 38%;   /* Accent color */
+  --icon-danger: 0 72% 51%;
 
   /* Sidebar Colors - Light Mode */
-  --sidebar: 0 0% 100%;         /* White sidebar */
-  --sidebar-foreground: 213 62% 11%;
-  --sidebar-primary: 187 85% 38%;
+  --sidebar: 0 0% 98%;                        /* Slight off-white */
+  --sidebar-foreground: 240 6% 10%;
+  --sidebar-primary: var(--accent-hue) 85% 38%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 25% 94%;
-  --sidebar-accent-foreground: 213 62% 11%;
-  --sidebar-border: 214 20% 88%;
-  --sidebar-ring: 187 85% 38%;
+  --sidebar-accent: 240 5% 96%;
+  --sidebar-accent-foreground: 240 6% 10%;
+  --sidebar-border: 240 6% 90%;
+  --sidebar-ring: var(--accent-hue) 85% 38%;
 }
 
 .dark {
-  /* Dark Mode - Primary theme */
-  --background: 220 50% 4%;     /* #050A12 - Deepest dark */
-  --foreground: 0 0% 100%;      /* White text */
-  --card: 213 62% 11%;          /* Blue Core */
-  --card-foreground: 0 0% 100%;
-  --popover: 213 47% 17%;       /* Blue Steel */
-  --popover-foreground: 0 0% 100%;
-  --primary: 187 80% 50%;       /* Cyan Core */
-  --primary-foreground: 213 62% 11%;
-  --secondary: 213 47% 17%;     /* Blue Steel */
-  --secondary-foreground: 0 0% 100%;
-  --muted: 213 47% 17%;         /* Blue Steel */
-  --muted-foreground: 210 20% 65%;
-  --accent: 187 80% 50%;        /* Cyan Core */
-  --accent-foreground: 213 62% 11%;
+  /* Dark Mode - shadcn neutral backgrounds with accent primary */
+  --background: 240 10% 4%;                   /* Near black */
+  --foreground: 0 0% 98%;                     /* Off-white text */
+  --card: 240 10% 4%;                         /* Same as background */
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 4%;
+  --popover-foreground: 0 0% 98%;
+  --primary: var(--accent-hue) 80% 50%;       /* Accent color */
+  --primary-foreground: 240 6% 10%;           /* Dark text on primary */
+  --secondary: 240 4% 16%;                    /* Dark neutral */
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 4% 16%;                        /* Dark neutral */
+  --muted-foreground: 240 5% 65%;
+  --accent: 240 4% 16%;                       /* Dark neutral for hover */
+  --accent-foreground: 0 0% 98%;
   --destructive: 0 62% 50%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 213 47% 17%;        /* Blue Steel */
-  --input: 213 47% 17%;
-  --ring: 187 80% 50%;          /* Cyan Core */
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 4% 16%;                       /* Dark neutral border */
+  --input: 240 4% 16%;
+  --ring: var(--accent-hue) 80% 50%;          /* Accent color */
 
   /* Chart Colors - Dark Mode */
-  --chart-1: 187 80% 50%;       /* Cyan Core */
-  --chart-2: 187 86% 42%;       /* Cyan Deep */
-  --chart-3: 212 49% 40%;       /* Blue Soft lighter */
-  --chart-4: 43 80% 55%;        /* Warning */
-  --chart-5: 0 75% 55%;         /* Danger */
+  --chart-1: var(--accent-hue) 80% 50%;       /* Accent color */
+  --chart-2: var(--accent-hue) 70% 60%;       /* Accent variant */
+  --chart-3: 197 37% 50%;                     /* Neutral */
+  --chart-4: 43 80% 55%;                      /* Warning */
+  --chart-5: 0 75% 55%;                       /* Danger */
 
   /* Icon Colors - Dark Mode */
-  --icon-default: 210 20% 55%;
-  --icon-active: 187 80% 50%;
+  --icon-default: 240 5% 65%;                 /* Neutral */
+  --icon-active: var(--accent-hue) 80% 50%;   /* Accent color */
   --icon-danger: 0 100% 65%;
 
   /* Sidebar Colors - Dark Mode */
-  --sidebar: 213 62% 11%;       /* Blue Core */
-  --sidebar-foreground: 0 0% 100%;
-  --sidebar-primary: 187 80% 50%;
-  --sidebar-primary-foreground: 213 62% 11%;
-  --sidebar-accent: 213 47% 17%;
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-border: 213 47% 17%;
-  --sidebar-ring: 187 80% 50%;
+  --sidebar: 240 6% 10%;                      /* Slightly lighter than bg */
+  --sidebar-foreground: 0 0% 98%;
+  --sidebar-primary: var(--accent-hue) 80% 50%;
+  --sidebar-primary-foreground: 240 6% 10%;
+  --sidebar-accent: 240 4% 16%;
+  --sidebar-accent-foreground: 0 0% 98%;
+  --sidebar-border: 240 4% 16%;
+  --sidebar-ring: var(--accent-hue) 80% 50%;
 }
 
 /* Base styles */
