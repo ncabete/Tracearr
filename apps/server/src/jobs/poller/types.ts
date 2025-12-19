@@ -6,6 +6,9 @@
  */
 
 import type { Session, SessionState, Rule, RuleParams, ActiveSession } from '@tracearr/shared';
+import type { sessions } from '../../db/schema.js';
+import type { GeoLocation } from '../../services/geoip.js';
+import type { ViolationInsertResult } from './violations.js';
 
 // ============================================================================
 // Configuration Types
@@ -168,6 +171,92 @@ export interface ServerProcessingResult {
   stoppedSessionKeys: string[];
   /** Sessions that were updated (state change, progress, etc.) */
   updatedSessions: ActiveSession[];
+}
+
+// ============================================================================
+// Session Lifecycle Types
+// ============================================================================
+
+/**
+ * Input for creating a session with rule evaluation
+ */
+export interface SessionCreationInput {
+  /** Processed session data from media server */
+  processed: ProcessedSession;
+  /** Server info */
+  server: { id: string; name: string; type: 'plex' | 'jellyfin' | 'emby' };
+  /** Server user info */
+  serverUser: {
+    id: string;
+    username: string;
+    thumbUrl: string | null;
+    identityName: string | null;
+  };
+  /** GeoIP location data */
+  geo: GeoLocation;
+  /** Active rules to evaluate */
+  activeRules: Rule[];
+  /** Recent sessions for rule evaluation context */
+  recentSessions: Session[];
+}
+
+/**
+ * Result when a quality change stops an active session
+ */
+export interface QualityChangeResult {
+  /** The session that was stopped */
+  stoppedSession: {
+    id: string;
+    serverUserId: string;
+    sessionKey: string;
+  };
+  /** Reference ID for the session chain */
+  referenceId: string;
+}
+
+/**
+ * Result of atomic session creation with rule evaluation
+ */
+export interface SessionCreationResult {
+  /** The inserted session row */
+  insertedSession: typeof sessions.$inferSelect;
+  /** Violations created during session creation */
+  violationResults: ViolationInsertResult[];
+  /** Quality change info if an active session was stopped */
+  qualityChange: QualityChangeResult | null;
+  /** Reference ID for session grouping (resume tracking) */
+  referenceId: string | null;
+}
+
+/**
+ * Input for stopping a session
+ */
+export interface SessionStopInput {
+  /** The session to stop */
+  session: typeof sessions.$inferSelect;
+  /** When the session stopped */
+  stoppedAt: Date;
+  /** Whether this is a force-stop (stale session cleanup) */
+  forceStopped?: boolean;
+  /**
+   * Whether to preserve the current watched status instead of calculating.
+   * Use for quality changes where playback continues in a new session.
+   */
+  preserveWatched?: boolean;
+}
+
+/**
+ * Result of stopping a session
+ */
+export interface SessionStopResult {
+  /** Actual watch duration excluding pause time */
+  durationMs: number;
+  /** Whether the user watched enough to count as "watched" */
+  watched: boolean;
+  /** Whether this was a short session (< MIN_PLAY_TIME_MS) */
+  shortSession: boolean;
+  /** Whether the update was applied (false if session was already stopped) */
+  wasUpdated: boolean;
 }
 
 // ============================================================================
