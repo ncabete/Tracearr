@@ -624,13 +624,14 @@ describe('transformActivityToSession', () => {
       expect(session.quality).toBeNull(); // Quality not available from Jellystat
     });
 
-    it('should treat DirectStream as transcode (not DirectPlay)', () => {
-      // Per mapping doc: isTranscode = PlayMethod !== 'DirectPlay'
-      // DirectStream is server-side processing, treated as transcode
+    it('should treat DirectStream as copy, not transcode', () => {
+      // DirectStream = container remux, no codec transcoding
+      // videoDecision: copy, audioDecision: copy, isTranscode: false
       const session = transformActivityToSession(MINIMAL_ACTIVITY, serverId, serverUserId, mockGeo);
 
-      expect(session.isTranscode).toBe(true);
-      expect(session.quality).toBeNull(); // Quality not available from Jellystat
+      expect(session.isTranscode).toBe(false);
+      expect(session.videoDecision).toBe('copy');
+      expect(session.audioDecision).toBe('copy');
     });
   });
 
