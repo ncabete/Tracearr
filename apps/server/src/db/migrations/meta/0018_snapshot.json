@@ -1,5 +1,5 @@
 {
-  "id": "ab6bcbdd-2db7-4aba-8ffe-7e59faa3dc6d",
+  "id": "c23f3a9f-5926-4795-9ab9-c9e633d2cf2d",
   "prevId": "60ebf6cd-93a8-469f-a2a4-5219bca7a982",
   "version": "7",
   "dialect": "postgresql",
@@ -257,6 +257,13 @@
         },
         "push_enabled": {
           "name": "push_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "web_toast_enabled": {
+          "name": "web_toast_enabled",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
@@ -662,12 +669,6 @@
         "thumb_url": {
           "name": "thumb_url",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "joined_at": {
-          "name": "joined_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1519,6 +1520,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "unit_system": {
+          "name": "unit_system",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'metric'"
         },
         "discord_webhook_url": {
           "name": "discord_webhook_url",
