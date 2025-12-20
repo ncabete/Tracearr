@@ -29,55 +29,67 @@ export function FileDropzone({
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (!disabled) {
-      setIsDragging(true);
-    }
-  }, [disabled]);
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (!disabled) {
+        setIsDragging(true);
+      }
+    },
+    [disabled]
+  );
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
   }, []);
 
-  const validateAndSelect = useCallback((file: File) => {
-    // Validate extension
-    const extensions = accept.split(',').map(ext => ext.trim().toLowerCase());
-    const fileExt = `.${file.name.split('.').pop()?.toLowerCase()}`;
+  const validateAndSelect = useCallback(
+    (file: File) => {
+      // Validate extension
+      const extensions = accept.split(',').map((ext) => ext.trim().toLowerCase());
+      const fileExt = `.${file.name.split('.').pop()?.toLowerCase()}`;
 
-    if (!extensions.includes(fileExt) && !extensions.includes('*')) {
-      onFileSelect(null);
-      return;
-    }
+      if (!extensions.includes(fileExt) && !extensions.includes('*')) {
+        onFileSelect(null);
+        return;
+      }
 
-    // Validate size
-    if (file.size > maxSize) {
-      onFileSelect(null);
-      return;
-    }
+      // Validate size
+      if (file.size > maxSize) {
+        onFileSelect(null);
+        return;
+      }
 
-    onFileSelect(file);
-  }, [accept, maxSize, onFileSelect]);
+      onFileSelect(file);
+    },
+    [accept, maxSize, onFileSelect]
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
 
-    if (disabled) return;
+      if (disabled) return;
 
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      validateAndSelect(file);
-    }
-  }, [disabled, validateAndSelect]);
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        validateAndSelect(file);
+      }
+    },
+    [disabled, validateAndSelect]
+  );
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      validateAndSelect(file);
-    }
-  }, [validateAndSelect]);
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        validateAndSelect(file);
+      }
+    },
+    [validateAndSelect]
+  );
 
   const handleRemoveFile = useCallback(() => {
     onFileSelect(null);
@@ -110,41 +122,36 @@ export function FileDropzone({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            'flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer',
+            'flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors',
             isDragging && 'border-primary bg-primary/5',
-            !isDragging && 'border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/50',
-            disabled && 'opacity-50 cursor-not-allowed',
+            !isDragging &&
+              'border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/50',
+            disabled && 'cursor-not-allowed opacity-50',
             error && 'border-destructive'
           )}
         >
-          <div className={cn(
-            'rounded-full p-3',
-            isDragging ? 'bg-primary/10' : 'bg-muted'
-          )}>
-            <Upload className={cn(
-              'h-6 w-6',
-              isDragging ? 'text-primary' : 'text-muted-foreground'
-            )} />
+          <div className={cn('rounded-full p-3', isDragging ? 'bg-primary/10' : 'bg-muted')}>
+            <Upload
+              className={cn('h-6 w-6', isDragging ? 'text-primary' : 'text-muted-foreground')}
+            />
           </div>
           <div className="text-center">
             <p className="font-medium">
               {isDragging ? 'Drop file here' : 'Drag & drop or click to select'}
             </p>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-muted-foreground mt-1 text-sm">
               {accept} files up to {formatFileSize(maxSize)}
             </p>
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-3 rounded-lg border p-3 bg-muted/30">
-          <div className="rounded-lg bg-primary/10 p-2">
-            <FileJson className="h-5 w-5 text-primary" />
+        <div className="bg-muted/30 flex items-center gap-3 rounded-lg border p-3">
+          <div className="bg-primary/10 rounded-lg p-2">
+            <FileJson className="text-primary h-5 w-5" />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium truncate">{selectedFile.name}</p>
-            <p className="text-sm text-muted-foreground">
-              {formatFileSize(selectedFile.size)}
-            </p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{selectedFile.name}</p>
+            <p className="text-muted-foreground text-sm">{formatFileSize(selectedFile.size)}</p>
           </div>
           <Button
             variant="ghost"
@@ -159,9 +166,7 @@ export function FileDropzone({
         </div>
       )}
 
-      {error && (
-        <p className="text-sm text-destructive">{error}</p>
-      )}
+      {error && <p className="text-destructive text-sm">{error}</p>}
     </div>
   );
 }

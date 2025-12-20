@@ -11,7 +11,7 @@
  * - Progress tracking via WebSocket
  */
 
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type {
   JellystatPlaybackActivity,
   JellystatImportProgress,
@@ -19,22 +19,27 @@ import type {
 } from '@tracearr/shared';
 import { jellystatBackupSchema } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { sessions, serverUsers, servers } from '../db/schema.js';
+import { servers } from '../db/schema.js';
+import type { sessions } from '../db/schema.js';
 import { refreshAggregates } from '../db/timescale.js';
 import { geoipService } from './geoip.js';
 import type { PubSubService } from './cache.js';
 import { JellyfinClient } from './mediaServer/jellyfin/client.js';
 import { EmbyClient } from './mediaServer/emby/client.js';
+import {
+  createUserMapping,
+  createSkippedUserTracker,
+  queryExistingByExternalIds,
+  flushInsertBatch,
+  createSimpleProgressPublisher,
+} from './import/index.js';
 
-// Configuration
-const BATCH_SIZE = 500; // Records per batch insert (larger = faster)
-const DEDUP_BATCH_SIZE = 5000; // Records per dedup query batch
-const ENRICHMENT_BATCH_SIZE = 200; // Items per Jellyfin API call
-const PROGRESS_THROTTLE_MS = 2000; // WebSocket update interval
-const PROGRESS_RECORD_INTERVAL = 500; // Update every N records
-
-// Jellyfin tick conversion (100ns ticks to milliseconds)
-const TICKS_TO_MS = 10000;
+const BATCH_SIZE = 500;
+const DEDUP_BATCH_SIZE = 5000;
+const ENRICHMENT_BATCH_SIZE = 200;
+const PROGRESS_THROTTLE_MS = 2000;
+const PROGRESS_RECORD_INTERVAL = 500;
+const TICKS_TO_MS = 10000; // 100ns ticks to ms
 
 /**
  * Media enrichment data from Jellyfin/Emby API
@@ -50,28 +55,34 @@ interface MediaEnrichment {
  * Interface for clients that support getItems (both Jellyfin and Emby)
  */
 interface MediaServerClientWithItems {
-  getItems(ids: string[]): Promise<{
-    Id: string;
-    ParentIndexNumber?: number;
-    IndexNumber?: number;
-    ProductionYear?: number;
-    ImageTags?: { Primary?: string };
-  }[]>;
+  getItems(ids: string[]): Promise<
+    {
+      Id: string;
+      ParentIndexNumber?: number;
+      IndexNumber?: number;
+      ProductionYear?: number;
+      ImageTags?: { Primary?: string };
+    }[]
+  >;
 }
 
 /**
  * Parse and validate Jellystat backup file
  */
 export function parseJellystatBackup(jsonString: string): JellystatPlaybackActivity[] {
-  const data = JSON.parse(jsonString);
+  const data: unknown = JSON.parse(jsonString);
   const parsed = jellystatBackupSchema.safeParse(data);
 
   if (!parsed.success) {
     throw new Error(`Invalid Jellystat backup format: ${parsed.error.message}`);
   }
 
-  // Extract playback activity from first array element
-  const activities = parsed.data[0]?.jf_playback_activity ?? [];
+  // Find the section containing playback activity (position varies in backup files)
+  const playbackSection = parsed.data.find(
+    (section): section is { jf_playback_activity: JellystatPlaybackActivity[] } =>
+      'jf_playback_activity' in section
+  );
+  const activities = playbackSection?.jf_playback_activity ?? [];
   return activities;
 }
 
@@ -85,19 +96,16 @@ export function transformActivityToSession(
   geo: ReturnType<typeof geoipService.lookup>,
   enrichment?: MediaEnrichment
 ): typeof sessions.$inferInsert {
-  // Parse duration (can be string or number)
   const durationSeconds =
     typeof activity.PlaybackDuration === 'string'
       ? parseInt(activity.PlaybackDuration, 10)
       : activity.PlaybackDuration;
   const durationMs = isNaN(durationSeconds) ? 0 : durationSeconds * 1000;
 
-  // Parse timestamps
   const stoppedAt = new Date(activity.ActivityDateInserted);
   const startedAt = new Date(stoppedAt.getTime() - durationMs);
 
-  // Parse ticks for progress/total duration
-  // Use != null to handle 0 correctly (0 is a valid value, not falsy)
+  // != null handles 0 correctly
   const positionMs =
     activity.PlayState?.PositionTicks != null
       ? Math.floor(activity.PlayState.PositionTicks / TICKS_TO_MS)
@@ -107,13 +115,8 @@ export function transformActivityToSession(
       ? Math.floor(activity.PlayState.RuntimeTicks / TICKS_TO_MS)
       : null;
 
-  // Determine media type (episode if SeriesName exists, else movie)
   const mediaType: 'movie' | 'episode' | 'track' = activity.SeriesName ? 'episode' : 'movie';
-
-  // Determine transcode status (anything not DirectPlay is considered a transcode)
   const isTranscode = activity.PlayMethod !== 'DirectPlay';
-
-  // Bitrate from transcoding info (bps to kbps)
   const bitrate = activity.TranscodingInfo?.Bitrate
     ? Math.floor(activity.TranscodingInfo.Bitrate / 1000)
     : null;
@@ -122,10 +125,10 @@ export function transformActivityToSession(
     serverId,
     serverUserId,
     sessionKey: activity.Id,
-    plexSessionId: null, // Not applicable for Jellyfin imports
+    plexSessionId: null,
     ratingKey: activity.NowPlayingItemId,
     externalSessionId: activity.Id,
-    referenceId: null, // Not available from Jellystat
+    referenceId: null,
     state: 'stopped',
     mediaType,
     mediaTitle: activity.NowPlayingItemName,
@@ -136,15 +139,15 @@ export function transformActivityToSession(
     thumbPath: enrichment?.thumbPath ?? null,
     startedAt,
     lastSeenAt: stoppedAt,
-    lastPausedAt: null, // Not available from Jellystat
+    lastPausedAt: null,
     stoppedAt,
     durationMs,
     totalDurationMs,
     progressMs: positionMs,
-    pausedDurationMs: 0, // Cannot calculate from Jellystat data
+    pausedDurationMs: 0,
     watched: activity.PlayState?.Completed ?? false,
-    forceStopped: false, // Historical imports are not force stopped
-    shortSession: durationMs < 120000, // Under 2 minutes = short session
+    forceStopped: false,
+    shortSession: durationMs < 120000,
     ipAddress: activity.RemoteEndPoint ?? '0.0.0.0',
     geoCity: geo.city,
     geoRegion: geo.region,
@@ -156,7 +159,7 @@ export function transformActivityToSession(
     deviceId: activity.DeviceId ?? null,
     product: activity.Client ?? null,
     platform: activity.Client ?? null,
-    quality: null, // Not available from Jellystat
+    quality: null,
     isTranscode,
     bitrate,
   };
@@ -181,20 +184,15 @@ async function fetchMediaEnrichment(
 
       const enrichment: MediaEnrichment = {};
 
-      // Season and episode numbers
       if (item.ParentIndexNumber != null) {
         enrichment.seasonNumber = item.ParentIndexNumber;
       }
       if (item.IndexNumber != null) {
         enrichment.episodeNumber = item.IndexNumber;
       }
-
-      // Production year
       if (item.ProductionYear != null) {
         enrichment.year = item.ProductionYear;
       }
-
-      // Thumb path (construct from ImageTags.Primary)
       if (item.ImageTags?.Primary) {
         enrichment.thumbPath = `/Items/${item.Id}/Images/Primary`;
       }
@@ -204,7 +202,6 @@ async function fetchMediaEnrichment(
       }
     }
   } catch (error) {
-    // Log but don't fail - enrichment is optional
     console.warn('[Jellystat] Media enrichment batch failed:', error);
   }
 
@@ -225,7 +222,6 @@ export async function importJellystatBackup(
   enrichMedia: boolean = true,
   pubSubService?: PubSubService
 ): Promise<JellystatImportResult> {
-  // Initialize progress
   const progress: JellystatImportProgress = {
     status: 'idle',
     totalRecords: 0,
@@ -237,33 +233,28 @@ export async function importJellystatBackup(
     message: 'Starting import...',
   };
 
-  // Throttled progress publishing
   let lastProgressTime = Date.now();
-  const publishProgress = () => {
-    if (pubSubService) {
-      pubSubService.publish('import:jellystat:progress', progress).catch((err: unknown) => {
-        console.warn('[Jellystat] Failed to publish progress:', err);
-      });
-    }
-  };
+  const publishProgress = createSimpleProgressPublisher<JellystatImportProgress>(
+    pubSubService,
+    'import:jellystat:progress'
+  );
 
-  publishProgress();
+  publishProgress(progress);
 
   try {
-    // === Phase 1: Parse backup ===
     progress.status = 'parsing';
     progress.message = 'Parsing Jellystat backup file...';
-    publishProgress();
+    publishProgress(progress);
 
     const activities = parseJellystatBackup(backupJson);
     progress.totalRecords = activities.length;
     progress.message = `Parsed ${activities.length} records from backup`;
-    publishProgress();
+    publishProgress(progress);
 
     if (activities.length === 0) {
       progress.status = 'complete';
       progress.message = 'No playback activity records found in backup';
-      publishProgress();
+      publishProgress(progress);
       return {
         success: true,
         imported: 0,
@@ -274,48 +265,27 @@ export async function importJellystatBackup(
       };
     }
 
-    // === Get server info for enrichment ===
     const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
 
     if (!server) {
       throw new Error(`Server not found: ${serverId}`);
     }
 
-    // Validate server type
     if (server.type !== 'jellyfin' && server.type !== 'emby') {
       throw new Error(`Jellystat import only supports Jellyfin/Emby servers, got: ${server.type}`);
     }
 
-    // === Build user mapping ===
-    const tracearrUsers = await db
-      .select()
-      .from(serverUsers)
-      .where(eq(serverUsers.serverId, serverId));
-
-    const userMap = new Map<string, string>(); // Jellyfin GUID → Tracearr serverUser ID
-    for (const su of tracearrUsers) {
-      if (su.externalId) {
-        userMap.set(su.externalId, su.id);
-      }
-    }
-
-    // NOTE: We no longer pre-fetch all sessions - instead we query in batches during processing
-    // This reduces memory from O(total_sessions) to O(batch_size)
-
-    // === Phase 2: Optional media enrichment ===
+    const userMap = await createUserMapping(serverId);
     const enrichmentMap = new Map<string, MediaEnrichment>();
 
     if (enrichMedia) {
       progress.status = 'enriching';
       progress.message = 'Fetching media metadata from Jellyfin...';
-      publishProgress();
+      publishProgress(progress);
 
-      // Get unique media IDs
       const uniqueMediaIds = [...new Set(activities.map((a) => a.NowPlayingItemId))];
       console.log(`[Jellystat] Enriching ${uniqueMediaIds.length} unique media items`);
 
-      // Create Jellyfin/Emby client (both have getItems method)
-      // Use JellyfinClient for both since Emby inherits from it and has same API
       const clientConfig = {
         url: server.url,
         token: server.token,
@@ -325,7 +295,6 @@ export async function importJellystatBackup(
       const client =
         server.type === 'emby' ? new EmbyClient(clientConfig) : new JellyfinClient(clientConfig);
 
-      // Batch fetch enrichment data
       for (let i = 0; i < uniqueMediaIds.length; i += ENRICHMENT_BATCH_SIZE) {
         const batch = uniqueMediaIds.slice(i, i + ENRICHMENT_BATCH_SIZE);
         const batchEnrichment = await fetchMediaEnrichment(client, batch);
@@ -336,86 +305,53 @@ export async function importJellystatBackup(
         }
 
         progress.message = `Enriching media: ${Math.min(i + ENRICHMENT_BATCH_SIZE, uniqueMediaIds.length)}/${uniqueMediaIds.length}`;
-        publishProgress();
+        publishProgress(progress);
       }
 
       console.log(`[Jellystat] Enriched ${enrichmentMap.size} media items`);
     }
 
-    // === Phase 3: Process records in chunks (batch dedup queries) ===
     progress.status = 'processing';
     progress.message = 'Processing records...';
-    publishProgress();
+    publishProgress(progress);
 
-    // GeoIP cache (persists across chunks)
     const geoCache = new Map<string, ReturnType<typeof geoipService.lookup>>();
-
-    // Track IDs we've already inserted in this import (to prevent duplicates within same import)
     const insertedInThisImport = new Set<string>();
 
     let imported = 0;
     let skipped = 0;
     let errors = 0;
 
-    // Track skipped users
-    const skippedUsers = new Map<string, { username: string | null; count: number }>();
+    const skippedUserTracker = createSkippedUserTracker();
 
-    // Process in chunks for batch dedup queries
     for (let chunkStart = 0; chunkStart < activities.length; chunkStart += DEDUP_BATCH_SIZE) {
       const chunk = activities.slice(chunkStart, chunkStart + DEDUP_BATCH_SIZE);
 
-      // Batch dedup query: get existing externalSessionIds for this chunk only
       const chunkIds = chunk.map((a) => a.Id).filter(Boolean);
-      let existingInChunk = new Set<string>();
+      const existingMap =
+        chunkIds.length > 0 ? await queryExistingByExternalIds(serverId, chunkIds) : new Map();
+      const existingInChunk = new Set(existingMap.keys());
 
-      if (chunkIds.length > 0) {
-        const existingSessions = await db
-          .select({ externalSessionId: sessions.externalSessionId })
-          .from(sessions)
-          .where(
-            and(
-              eq(sessions.serverId, serverId),
-              inArray(sessions.externalSessionId, chunkIds)
-            )
-          );
-        existingInChunk = new Set(
-          existingSessions.map((s) => s.externalSessionId).filter((id): id is string => id != null)
-        );
-      }
-
-      // Process chunk records
       const insertBatch: (typeof sessions.$inferInsert)[] = [];
 
       for (const activity of chunk) {
         progress.processedRecords++;
 
         try {
-          // Find server user by Jellyfin GUID
           const serverUserId = userMap.get(activity.UserId);
           if (!serverUserId) {
-            // User not found - track for warning
-            const existing = skippedUsers.get(activity.UserId);
-            if (existing) {
-              existing.count++;
-            } else {
-              skippedUsers.set(activity.UserId, {
-                username: activity.UserName ?? null,
-                count: 1,
-              });
-            }
+            skippedUserTracker.track(activity.UserId, activity.UserName ?? null);
             skipped++;
             progress.skippedRecords++;
             continue;
           }
 
-          // Check for existing session (deduplicate)
           if (existingInChunk.has(activity.Id) || insertedInThisImport.has(activity.Id)) {
             skipped++;
             progress.skippedRecords++;
             continue;
           }
 
-          // Get GeoIP data (cached)
           const ipAddress = activity.RemoteEndPoint ?? '0.0.0.0';
           let geo = geoCache.get(ipAddress);
           if (!geo) {
@@ -423,10 +359,7 @@ export async function importJellystatBackup(
             geoCache.set(ipAddress, geo);
           }
 
-          // Get enrichment data if available
           const enrichment = enrichmentMap.get(activity.NowPlayingItemId);
-
-          // Transform and add to batch
           const sessionData = transformActivityToSession(
             activity,
             serverId,
@@ -436,7 +369,6 @@ export async function importJellystatBackup(
           );
           insertBatch.push(sessionData);
 
-          // Track to prevent duplicates within same import
           insertedInThisImport.add(activity.Id);
 
           imported++;
@@ -447,62 +379,51 @@ export async function importJellystatBackup(
           progress.errorRecords++;
         }
 
-        // Throttled progress updates
         const now = Date.now();
         if (
           progress.processedRecords % PROGRESS_RECORD_INTERVAL === 0 ||
           now - lastProgressTime > PROGRESS_THROTTLE_MS
         ) {
           progress.message = `Processing: ${progress.processedRecords}/${progress.totalRecords}`;
-          publishProgress();
+          publishProgress(progress);
           lastProgressTime = now;
         }
       }
 
-      // Flush chunk batch - insert in sub-batches for very large chunks
       if (insertBatch.length > 0) {
-        for (let i = 0; i < insertBatch.length; i += BATCH_SIZE) {
-          const subBatch = insertBatch.slice(i, i + BATCH_SIZE);
-          await db.insert(sessions).values(subBatch);
-        }
+        await flushInsertBatch(insertBatch, { chunkSize: BATCH_SIZE });
       }
+
+      geoCache.clear();
     }
 
-    // Refresh TimescaleDB aggregates
     progress.message = 'Refreshing aggregates...';
-    publishProgress();
+    publishProgress(progress);
     try {
       await refreshAggregates();
     } catch (err) {
       console.warn('[Jellystat] Failed to refresh aggregates after import:', err);
     }
 
-    // Build result message
     let message = `Import complete: ${imported} imported, ${skipped} skipped, ${errors} errors`;
     if (enrichMedia && enrichmentMap.size > 0) {
       message += `, ${enrichmentMap.size} media items enriched`;
     }
 
-    if (skippedUsers.size > 0) {
-      // List top 5 skipped users sorted by count (most skipped first)
-      const skippedUserList = [...skippedUsers.values()]
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5)
-        .map((u) => `${u.username ?? 'Unknown'} (${u.count} records)`)
-        .join(', ');
-
-      const moreUsers = skippedUsers.size > 5 ? ` and ${skippedUsers.size - 5} more` : '';
-      message += `. Warning: ${skippedUsers.size} users not found in Tracearr: ${skippedUserList}${moreUsers}. Sync your server first to import their history.`;
-
+    const skippedUsersWarning = skippedUserTracker.formatWarning();
+    if (skippedUsersWarning) {
+      message += `. Warning: ${skippedUsersWarning}`;
       console.warn(
-        `[Jellystat] Import skipped users: ${[...skippedUsers.entries()].map(([id, data]) => `${data.username}(${id})`).join(', ')}`
+        `[Jellystat] Import skipped users: ${skippedUserTracker
+          .getAll()
+          .map((u) => `${u.username}(${u.externalId})`)
+          .join(', ')}`
       );
     }
 
-    // Final progress update
     progress.status = 'complete';
     progress.message = message;
-    publishProgress();
+    publishProgress(progress);
 
     return {
       success: true,
@@ -512,11 +433,11 @@ export async function importJellystatBackup(
       enriched: enrichmentMap.size,
       message,
       skippedUsers:
-        skippedUsers.size > 0
-          ? [...skippedUsers.entries()].map(([id, data]) => ({
-              jellyfinUserId: id,
-              username: data.username,
-              recordCount: data.count,
+        skippedUserTracker.size > 0
+          ? skippedUserTracker.getAll().map((u) => ({
+              jellyfinUserId: u.externalId,
+              username: u.username,
+              recordCount: u.count,
             }))
           : undefined,
     };
@@ -526,7 +447,7 @@ export async function importJellystatBackup(
 
     progress.status = 'error';
     progress.message = `Import failed: ${errorMessage}`;
-    publishProgress();
+    publishProgress(progress);
 
     return {
       success: false,

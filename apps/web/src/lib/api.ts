@@ -815,7 +815,9 @@ class ApiClient {
           finishedAt?: number;
         }>(`/import/jellystat/${jobId}`),
       cancel: (jobId: string) =>
-        this.request<{ status: string; jobId: string }>(`/import/jellystat/${jobId}`, { method: 'DELETE' }),
+        this.request<{ status: string; jobId: string }>(`/import/jellystat/${jobId}`, {
+          method: 'DELETE',
+        }),
     },
   };
 

@@ -188,7 +188,9 @@ async function processImportJob(job: Job<ImportJobData>): Promise<ImportJobResul
 /**
  * Process a Tautulli import job
  */
-async function processTautulliImportJob(job: Job<TautulliImportJobData>): Promise<TautulliImportResult> {
+async function processTautulliImportJob(
+  job: Job<TautulliImportJobData>
+): Promise<TautulliImportResult> {
   const { serverId } = job.data;
   const pubSubService = getPubSubService();
 
@@ -255,12 +257,19 @@ async function processTautulliImportJob(job: Job<TautulliImportJobData>): Promis
 /**
  * Process a Jellystat import job
  */
-async function processJellystatImportJob(job: Job<JellystatImportJobData>): Promise<JellystatImportResult> {
+async function processJellystatImportJob(
+  job: Job<JellystatImportJobData>
+): Promise<JellystatImportResult> {
   const { serverId, backupJson, enrichMedia } = job.data;
   const pubSubService = getPubSubService();
 
   // Run the actual import
-  const result = await importJellystatBackup(serverId, backupJson, enrichMedia, pubSubService ?? undefined);
+  const result = await importJellystatBackup(
+    serverId,
+    backupJson,
+    enrichMedia,
+    pubSubService ?? undefined
+  );
 
   // Publish final result
   if (pubSubService) {

@@ -236,112 +236,118 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
    * - serverId: Target server UUID
    * - enrichMedia: Whether to enrich with metadata (default: true)
    */
-  app.post(
-    '/jellystat',
-    { preHandler: [app.authenticate] },
-    async (request, reply) => {
-      const authUser = request.user;
+  app.post('/jellystat', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const authUser = request.user;
 
-      // Only owners can import data
-      if (authUser.role !== 'owner') {
-        return reply.forbidden('Only server owners can import data');
-      }
-
-      // Parse multipart form data
-      const data = await request.file();
-      if (!data) {
-        return reply.badRequest('No file uploaded');
-      }
-
-      // Get form fields - handle @fastify/multipart field structure
-      // Fields can be single values or arrays, and have a 'value' property
-      const getFieldValue = (field: unknown): string | undefined => {
-        if (!field) return undefined;
-        // If it's an array, get the first element
-        const f = Array.isArray(field) ? field[0] : field;
-        // Check if it's a field (not a file) with a value property
-        if (f && typeof f === 'object' && 'value' in f) {
-          return String(f.value);
-        }
-        return undefined;
-      };
-
-      const serverId = getFieldValue(data.fields.serverId);
-      const enrichMediaStr = getFieldValue(data.fields.enrichMedia) ?? 'true';
-      const enrichMedia = enrichMediaStr === 'true';
-
-      // Validate server ID
-      const parsed = jellystatImportBodySchema.safeParse({ serverId, enrichMedia });
-      if (!parsed.success) {
-        return reply.badRequest('Invalid request: serverId is required');
-      }
-
-      // Verify server exists and is Jellyfin/Emby
-      const [server] = await db.select().from(servers).where(eq(servers.id, parsed.data.serverId)).limit(1);
-      if (!server) {
-        return reply.notFound('Server not found');
-      }
-      if (server.type !== 'jellyfin' && server.type !== 'emby') {
-        return reply.badRequest('Jellystat import only supports Jellyfin/Emby servers');
-      }
-
-      // Read file contents
-      const chunks: Buffer[] = [];
-      for await (const chunk of data.file) {
-        chunks.push(chunk);
-      }
-      const backupJson = Buffer.concat(chunks).toString('utf-8');
-
-      // Sync server users first
-      try {
-        app.log.info({ serverId }, 'Syncing server before Jellystat import');
-        await syncServer(parsed.data.serverId, { syncUsers: true, syncLibraries: false });
-        app.log.info({ serverId }, 'Server sync completed');
-      } catch (error) {
-        app.log.error({ error, serverId }, 'Failed to sync server before import');
-        return reply.internalServerError('Failed to sync server users before import');
-      }
-
-      // Enqueue import job
-      try {
-        const jobId = await enqueueJellystatImport(
-          parsed.data.serverId,
-          authUser.userId,
-          backupJson,
-          parsed.data.enrichMedia
-        );
-
-        return {
-          status: 'queued',
-          jobId,
-          message: 'Import queued. Use jobId to track progress via WebSocket or GET /import/jellystat/:jobId',
-        };
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('already in progress')) {
-          return reply.conflict(error.message);
-        }
-
-        // Fallback to direct execution if queue is not available
-        app.log.warn({ error }, 'Import queue unavailable, falling back to direct execution');
-
-        const pubSubService = getPubSubService();
-
-        // Start import in background (non-blocking)
-        importJellystatBackup(parsed.data.serverId, backupJson, enrichMedia, pubSubService ?? undefined)
-          .then((result) => {
-            console.log(`[Import] Jellystat import completed:`, result);
-          })
-          .catch((err: unknown) => {
-            console.error(`[Import] Jellystat import failed:`, err);
-          });
-
-        return {
-          status: 'started',
-          message: 'Import started (direct execution). Watch for progress updates via WebSocket.',
-        };
-      }
+    // Only owners can import data
+    if (authUser.role !== 'owner') {
+      return reply.forbidden('Only server owners can import data');
     }
-  );
+
+    // Parse multipart form data
+    const data = await request.file();
+    if (!data) {
+      return reply.badRequest('No file uploaded');
+    }
+
+    // Get form fields - handle @fastify/multipart field structure
+    // Fields can be single values or arrays, and have a 'value' property
+    const getFieldValue = (field: unknown): string | undefined => {
+      if (!field) return undefined;
+      // If it's an array, get the first element
+      const f = Array.isArray(field) ? field[0] : field;
+      // Check if it's a field (not a file) with a value property
+      if (f && typeof f === 'object' && 'value' in f) {
+        return String(f.value);
+      }
+      return undefined;
+    };
+
+    const serverId = getFieldValue(data.fields.serverId);
+    const enrichMediaStr = getFieldValue(data.fields.enrichMedia) ?? 'true';
+    const enrichMedia = enrichMediaStr === 'true';
+
+    // Validate server ID
+    const parsed = jellystatImportBodySchema.safeParse({ serverId, enrichMedia });
+    if (!parsed.success) {
+      return reply.badRequest('Invalid request: serverId is required');
+    }
+
+    // Verify server exists and is Jellyfin/Emby
+    const [server] = await db
+      .select()
+      .from(servers)
+      .where(eq(servers.id, parsed.data.serverId))
+      .limit(1);
+    if (!server) {
+      return reply.notFound('Server not found');
+    }
+    if (server.type !== 'jellyfin' && server.type !== 'emby') {
+      return reply.badRequest('Jellystat import only supports Jellyfin/Emby servers');
+    }
+
+    // Read file contents
+    const chunks: Buffer[] = [];
+    for await (const chunk of data.file) {
+      chunks.push(chunk);
+    }
+    const backupJson = Buffer.concat(chunks).toString('utf-8');
+
+    // Sync server users first
+    try {
+      app.log.info({ serverId }, 'Syncing server before Jellystat import');
+      await syncServer(parsed.data.serverId, { syncUsers: true, syncLibraries: false });
+      app.log.info({ serverId }, 'Server sync completed');
+    } catch (error) {
+      app.log.error({ error, serverId }, 'Failed to sync server before import');
+      return reply.internalServerError('Failed to sync server users before import');
+    }
+
+    // Enqueue import job
+    try {
+      const jobId = await enqueueJellystatImport(
+        parsed.data.serverId,
+        authUser.userId,
+        backupJson,
+        parsed.data.enrichMedia
+      );
+
+      return {
+        status: 'queued',
+        jobId,
+        message:
+          'Import queued. Use jobId to track progress via WebSocket or GET /import/jellystat/:jobId',
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('already in progress')) {
+        return reply.conflict(error.message);
+      }
+
+      // Fallback to direct execution if queue is not available
+      app.log.warn({ error }, 'Import queue unavailable, falling back to direct execution');
+
+      const pubSubService = getPubSubService();
+
+      // Start import in background (non-blocking)
+      importJellystatBackup(
+        parsed.data.serverId,
+        backupJson,
+        enrichMedia,
+        pubSubService ?? undefined
+      )
+        .then((result) => {
+          console.log(`[Import] Jellystat import completed:`, result);
+        })
+        .catch((err: unknown) => {
+          console.error(`[Import] Jellystat import failed:`, err);
+        });
+
+      return {
+        status: 'started',
+        message: 'Import started (direct execution). Watch for progress updates via WebSocket.',
+      };
+    }
+  });
 
   /**
    * GET /import/jellystat/active/:serverId - Get active Jellystat import for a server

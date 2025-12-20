@@ -14,7 +14,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Import production functions for testing
-import { parseJellystatBackup, transformActivityToSession, importJellystatBackup } from '../jellystat.js';
+import {
+  parseJellystatBackup,
+  transformActivityToSession,
+  importJellystatBackup,
+} from '../jellystat.js';
 
 // Import schemas for validation tests
 import {
@@ -204,7 +208,9 @@ const ZERO_RUNTIME_ACTIVITY = {
 
 // Backup structures
 const VALID_BACKUP_SINGLE = [{ jf_playback_activity: [MOVIE_ACTIVITY] }];
-const VALID_BACKUP_MULTIPLE = [{ jf_playback_activity: [MOVIE_ACTIVITY, EPISODE_ACTIVITY, MINIMAL_ACTIVITY] }];
+const VALID_BACKUP_MULTIPLE = [
+  { jf_playback_activity: [MOVIE_ACTIVITY, EPISODE_ACTIVITY, MINIMAL_ACTIVITY] },
+];
 const EMPTY_BACKUP = [{ jf_playback_activity: [] }];
 
 // ============================================================================
@@ -484,12 +490,7 @@ describe('transformActivityToSession', () => {
 
   describe('basic transformation', () => {
     it('should transform movie activity correctly', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.serverId).toBe(serverId);
       expect(session.serverUserId).toBe(serverUserId);
@@ -502,12 +503,7 @@ describe('transformActivityToSession', () => {
     });
 
     it('should transform episode activity correctly', () => {
-      const session = transformActivityToSession(
-        EPISODE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(EPISODE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.mediaType).toBe('episode');
       expect(session.mediaTitle).toBe('The One Where They All Turn Thirty');
@@ -517,12 +513,7 @@ describe('transformActivityToSession', () => {
 
   describe('duration calculations', () => {
     it('should convert numeric PlaybackDuration to milliseconds', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.durationMs).toBe(7200000); // 2 hours
     });
@@ -551,24 +542,14 @@ describe('transformActivityToSession', () => {
 
   describe('tick conversions', () => {
     it('should convert PositionTicks to progressMs', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       // 72000000000 ticks / 10000 = 7200000 ms
       expect(session.progressMs).toBe(7200000);
     });
 
     it('should convert RuntimeTicks to totalDurationMs', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       // 81000000000 ticks / 10000 = 8100000 ms
       expect(session.totalDurationMs).toBe(8100000);
@@ -599,24 +580,14 @@ describe('transformActivityToSession', () => {
 
   describe('timestamp calculations', () => {
     it('should set stoppedAt from ActivityDateInserted', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       const expectedStoppedAt = new Date('2024-12-15T10:30:00.000Z');
       expect(session.stoppedAt?.getTime()).toBe(expectedStoppedAt.getTime());
     });
 
     it('should calculate startedAt from stoppedAt minus duration', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       const stoppedAt = new Date('2024-12-15T10:30:00.000Z');
       const expectedStartedAt = new Date(stoppedAt.getTime() - 7200000);
@@ -626,23 +597,13 @@ describe('transformActivityToSession', () => {
 
   describe('media type detection', () => {
     it('should detect movie when SeriesName is null', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.mediaType).toBe('movie');
     });
 
     it('should detect episode when SeriesName is present', () => {
-      const session = transformActivityToSession(
-        EPISODE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(EPISODE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.mediaType).toBe('episode');
     });
@@ -650,24 +611,14 @@ describe('transformActivityToSession', () => {
 
   describe('transcode detection', () => {
     it('should detect transcode (PlayMethod = Transcode)', () => {
-      const session = transformActivityToSession(
-        EPISODE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(EPISODE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.isTranscode).toBe(true);
       expect(session.quality).toBeNull(); // Quality not available from Jellystat
     });
 
     it('should detect direct play (PlayMethod = DirectPlay)', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.isTranscode).toBe(false);
       expect(session.quality).toBeNull(); // Quality not available from Jellystat
@@ -685,24 +636,14 @@ describe('transformActivityToSession', () => {
 
   describe('bitrate conversion', () => {
     it('should convert bitrate from bps to kbps', () => {
-      const session = transformActivityToSession(
-        EPISODE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(EPISODE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       // 3500000 bps / 1000 = 3500 kbps
       expect(session.bitrate).toBe(3500);
     });
 
     it('should handle missing bitrate', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.bitrate).toBeNull();
     });
@@ -710,12 +651,7 @@ describe('transformActivityToSession', () => {
 
   describe('GeoIP integration', () => {
     it('should include geo data in session', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.geoCity).toBe('Jersey City');
       expect(session.geoRegion).toBe('New Jersey');
@@ -733,12 +669,7 @@ describe('transformActivityToSession', () => {
         lat: null,
         lon: null,
       };
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        nullGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, nullGeo);
 
       expect(session.geoCity).toBeNull();
       expect(session.geoLat).toBeNull();
@@ -747,12 +678,7 @@ describe('transformActivityToSession', () => {
 
   describe('IP address handling', () => {
     it('should use RemoteEndPoint for IP address', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.ipAddress).toBe('73.160.197.140');
     });
@@ -766,23 +692,13 @@ describe('transformActivityToSession', () => {
 
   describe('watched status', () => {
     it('should set watched from PlayState.Completed', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.watched).toBe(true);
     });
 
     it('should set watched to false when not completed', () => {
-      const session = transformActivityToSession(
-        EPISODE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(EPISODE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.watched).toBe(false);
     });
@@ -796,12 +712,7 @@ describe('transformActivityToSession', () => {
 
   describe('device/player info', () => {
     it('should set playerName from DeviceName', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.playerName).toBe('Samsung TV');
     });
@@ -822,12 +733,7 @@ describe('transformActivityToSession', () => {
     });
 
     it('should set product and platform from Client', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.product).toBe('Jellyfin Web');
       expect(session.platform).toBe('Jellyfin Web');
@@ -858,12 +764,7 @@ describe('transformActivityToSession', () => {
     });
 
     it('should use null for missing enrichment', () => {
-      const session = transformActivityToSession(
-        EPISODE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(EPISODE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.seasonNumber).toBeNull();
       expect(session.episodeNumber).toBeNull();
@@ -874,56 +775,31 @@ describe('transformActivityToSession', () => {
 
   describe('Jellyfin-specific fields', () => {
     it('should set plexSessionId to null (not applicable for Jellyfin)', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.plexSessionId).toBeNull();
     });
 
     it('should set lastPausedAt to null (not available from Jellystat)', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.lastPausedAt).toBeNull();
     });
 
     it('should set referenceId to null (not available from Jellystat)', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.referenceId).toBeNull();
     });
 
     it('should set forceStopped to false (historical imports)', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.forceStopped).toBe(false);
     });
 
     it('should set device from DeviceName', () => {
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.device).toBe('Samsung TV');
     });
@@ -951,12 +827,7 @@ describe('transformActivityToSession', () => {
         ...MOVIE_ACTIVITY,
         PlaybackDuration: '60',
       };
-      const session = transformActivityToSession(
-        shortActivity,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(shortActivity, serverId, serverUserId, mockGeo);
 
       expect(session.shortSession).toBe(true);
       expect(session.durationMs).toBe(60000);
@@ -964,12 +835,7 @@ describe('transformActivityToSession', () => {
 
     it('should not mark session as short when duration >= 2 minutes', () => {
       // MOVIE_ACTIVITY has PlaybackDuration: '7200' (2 hours)
-      const session = transformActivityToSession(
-        MOVIE_ACTIVITY,
-        serverId,
-        serverUserId,
-        mockGeo
-      );
+      const session = transformActivityToSession(MOVIE_ACTIVITY, serverId, serverUserId, mockGeo);
 
       expect(session.shortSession).toBe(false);
       expect(session.durationMs).toBe(7200000);
@@ -1695,9 +1561,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_UNKNOWN_USER],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_UNKNOWN_USER],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -1733,9 +1601,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -1767,9 +1637,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1, REAL_BACKUP_ACTIVITY_2],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1, REAL_BACKUP_ACTIVITY_2],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -1803,13 +1675,15 @@ describe('importJellystatBackup', () => {
       });
 
       // Create multiple records with same user
-      const backup = JSON.stringify([{
-        jf_playback_activity: [
-          REAL_BACKUP_ACTIVITY_1,
-          REAL_BACKUP_ACTIVITY_2,
-          { ...REAL_BACKUP_ACTIVITY_1, Id: '9999' }, // Different ID
-        ],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [
+            REAL_BACKUP_ACTIVITY_1,
+            REAL_BACKUP_ACTIVITY_2,
+            { ...REAL_BACKUP_ACTIVITY_1, Id: '9999' }, // Different ID
+          ],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -1838,12 +1712,14 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [
-          REAL_BACKUP_ACTIVITY_1, // Known user
-          REAL_BACKUP_ACTIVITY_UNKNOWN_USER, // Unknown user
-        ],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [
+            REAL_BACKUP_ACTIVITY_1, // Known user
+            REAL_BACKUP_ACTIVITY_UNKNOWN_USER, // Unknown user
+          ],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -1879,9 +1755,11 @@ describe('importJellystatBackup', () => {
         publish: vi.fn().mockResolvedValue(undefined),
       };
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+        },
+      ]);
 
       await importJellystatBackup(serverId, backup, false, mockPubSub as any);
 
@@ -1915,9 +1793,11 @@ describe('importJellystatBackup', () => {
         publish: vi.fn().mockRejectedValue(new Error('Publish failed')),
       };
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+        },
+      ]);
 
       // Should not throw despite publish errors
       const result = await importJellystatBackup(serverId, backup, false, mockPubSub as any);
@@ -1949,9 +1829,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+        },
+      ]);
 
       await importJellystatBackup(serverId, backup, false);
 
@@ -1961,7 +1843,9 @@ describe('importJellystatBackup', () => {
     it('should continue even if refreshAggregates fails', async () => {
       const { db } = await import('../../db/client.js');
       const { refreshAggregates } = await import('../../db/timescale.js');
-      (refreshAggregates as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Aggregate refresh failed'));
+      (refreshAggregates as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Aggregate refresh failed')
+      );
 
       let callCount = 0;
       (db.select as ReturnType<typeof vi.fn>).mockImplementation(() => {
@@ -1981,9 +1865,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -2014,9 +1900,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -2047,9 +1935,11 @@ describe('importJellystatBackup', () => {
         return { from: mockFrom };
       });
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [REAL_BACKUP_ACTIVITY_UNKNOWN_USER],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [REAL_BACKUP_ACTIVITY_UNKNOWN_USER],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -2095,9 +1985,11 @@ describe('importJellystatBackup', () => {
         });
       }
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: activities,
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: activities,
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -2129,16 +2021,55 @@ describe('importJellystatBackup', () => {
       });
 
       // Create multiple unknown users with different record counts
-      const unknownUser1 = { ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER, Id: '2001', UserId: 'unknown-1', UserName: 'Alice' };
-      const unknownUser2 = { ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER, Id: '2002', UserId: 'unknown-2', UserName: 'Bob' };
-      const unknownUser3 = { ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER, Id: '2003', UserId: 'unknown-2', UserName: 'Bob' }; // Same user as 2
-      const unknownUser4 = { ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER, Id: '2004', UserId: 'unknown-3', UserName: 'Charlie' };
-      const unknownUser5 = { ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER, Id: '2005', UserId: 'unknown-3', UserName: 'Charlie' };
-      const unknownUser6 = { ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER, Id: '2006', UserId: 'unknown-3', UserName: 'Charlie' }; // Charlie has 3 records
+      const unknownUser1 = {
+        ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER,
+        Id: '2001',
+        UserId: 'unknown-1',
+        UserName: 'Alice',
+      };
+      const unknownUser2 = {
+        ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER,
+        Id: '2002',
+        UserId: 'unknown-2',
+        UserName: 'Bob',
+      };
+      const unknownUser3 = {
+        ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER,
+        Id: '2003',
+        UserId: 'unknown-2',
+        UserName: 'Bob',
+      }; // Same user as 2
+      const unknownUser4 = {
+        ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER,
+        Id: '2004',
+        UserId: 'unknown-3',
+        UserName: 'Charlie',
+      };
+      const unknownUser5 = {
+        ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER,
+        Id: '2005',
+        UserId: 'unknown-3',
+        UserName: 'Charlie',
+      };
+      const unknownUser6 = {
+        ...REAL_BACKUP_ACTIVITY_UNKNOWN_USER,
+        Id: '2006',
+        UserId: 'unknown-3',
+        UserName: 'Charlie',
+      }; // Charlie has 3 records
 
-      const backup = JSON.stringify([{
-        jf_playback_activity: [unknownUser1, unknownUser2, unknownUser3, unknownUser4, unknownUser5, unknownUser6],
-      }]);
+      const backup = JSON.stringify([
+        {
+          jf_playback_activity: [
+            unknownUser1,
+            unknownUser2,
+            unknownUser3,
+            unknownUser4,
+            unknownUser5,
+            unknownUser6,
+          ],
+        },
+      ]);
 
       const result = await importJellystatBackup(serverId, backup, false);
 
@@ -2206,9 +2137,11 @@ describe('Media Enrichment', () => {
     });
     (db.insert as ReturnType<typeof vi.fn>).mockReturnValue({ values: mockValues });
 
-    const backup = JSON.stringify([{
-      jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-    }]);
+    const backup = JSON.stringify([
+      {
+        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+      },
+    ]);
 
     const result = await importJellystatBackup('server-1', backup, true);
 
@@ -2264,9 +2197,11 @@ describe('Media Enrichment', () => {
       return { from: mockFrom };
     });
 
-    const backup = JSON.stringify([{
-      jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
-    }]);
+    const backup = JSON.stringify([
+      {
+        jf_playback_activity: [REAL_BACKUP_ACTIVITY_1],
+      },
+    ]);
 
     // Should not throw - enrichment failures are logged but don't stop import
     const result = await importJellystatBackup('server-1', backup, true);

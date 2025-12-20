@@ -2,14 +2,25 @@
  * Tautulli API integration and import service
  */
 
-import { eq, inArray, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { TautulliImportProgress, TautulliImportResult } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { sessions, serverUsers, settings } from '../db/schema.js';
+import { settings, type sessions } from '../db/schema.js';
 import { refreshAggregates } from '../db/timescale.js';
 import { geoipService } from './geoip.js';
 import type { PubSubService } from './cache.js';
+import {
+  queryExistingByExternalIds,
+  queryExistingByTimeKeys,
+  createTimeKey,
+  createUserMapping,
+  createSkippedUserTracker,
+  flushInsertBatch,
+  flushUpdateBatch,
+  type SessionUpdate,
+  createSimpleProgressPublisher,
+} from './import/index.js';
 
 const PAGE_SIZE = 5000; // Larger batches = fewer API calls (tested up to 10k, scales linearly)
 const REQUEST_TIMEOUT_MS = 30000; // 30 seconds
@@ -332,41 +343,23 @@ export class TautulliService {
       message: 'Connecting to Tautulli...',
     };
 
-    // Throttled progress publishing (fire-and-forget, every 100 records or 2 seconds)
-    // Also calls onProgress callback for BullMQ lock extension
-    let lastProgressTime = Date.now();
-    const publishProgress = () => {
-      if (pubSubService) {
-        pubSubService.publish('import:progress', progress).catch((err: unknown) => {
-          console.warn('Failed to publish progress:', err);
-        });
-      }
-      // Call onProgress callback (extends BullMQ lock for large imports)
-      if (onProgress) {
-        onProgress(progress).catch((err: unknown) => {
-          console.warn('Failed to call onProgress callback:', err);
-        });
-      }
-    };
+    // Create progress publisher using shared module
+    const publishProgress = createSimpleProgressPublisher(
+      pubSubService,
+      'import:progress',
+      onProgress
+    );
 
-    publishProgress();
+    publishProgress(progress);
 
-    // Get user mapping (Tautulli user_id → Tracearr user_id)
+    // Get user mapping using shared module
+    const userMapRaw = await createUserMapping(serverId);
+    // Convert to number keys for Tautulli (Plex uses numeric user IDs)
     const userMap = new Map<number, string>();
-
-    // Get all Tracearr server users for this server
-    const tracearrUsers = await db
-      .select()
-      .from(serverUsers)
-      .where(eq(serverUsers.serverId, serverId));
-
-    // Map by externalId (Plex user ID)
-    for (const serverUser of tracearrUsers) {
-      if (serverUser.externalId) {
-        const plexUserId = parseInt(serverUser.externalId, 10);
-        if (!isNaN(plexUserId)) {
-          userMap.set(plexUserId, serverUser.id);
-        }
+    for (const [externalId, userId] of userMapRaw) {
+      const plexUserId = parseInt(externalId, 10);
+      if (!isNaN(plexUserId)) {
+        userMap.set(plexUserId, userId);
       }
     }
 
@@ -375,121 +368,21 @@ export class TautulliService {
     progress.totalRecords = total;
     progress.totalPages = Math.ceil(total / PAGE_SIZE);
     progress.message = `Found ${total} records to import`;
-    publishProgress();
-
-    // === MEMORY OPTIMIZATION: Per-page dedup instead of pre-loading all sessions ===
-    // This uses constant memory regardless of total import size (critical for 300k+ imports)
-    // Trade-off: One extra query per page, but avoids loading 300k+ sessions into memory
-    interface ExistingSession {
-      id: string;
-      externalSessionId: string | null;
-      ratingKey: string | null;
-      startedAt: Date | null;
-      serverUserId: string;
-      totalDurationMs: number | null;
-      stoppedAt: Date | null;
-      durationMs: number | null;
-      pausedDurationMs: number | null;
-      watched: boolean | null;
-    }
+    publishProgress(progress);
 
     // Track externalSessionIds we've already inserted in THIS import run
-    // (prevents duplicates within the same import when records appear on multiple pages)
     const insertedThisRun = new Set<string>();
 
-    // Helper to query existing sessions for a batch of reference IDs
-    const queryExistingByRefIds = async (
-      refIds: string[]
-    ): Promise<Map<string, ExistingSession>> => {
-      if (refIds.length === 0) return new Map();
-
-      const existing = await db
-        .select({
-          id: sessions.id,
-          externalSessionId: sessions.externalSessionId,
-          ratingKey: sessions.ratingKey,
-          startedAt: sessions.startedAt,
-          serverUserId: sessions.serverUserId,
-          totalDurationMs: sessions.totalDurationMs,
-          stoppedAt: sessions.stoppedAt,
-          durationMs: sessions.durationMs,
-          pausedDurationMs: sessions.pausedDurationMs,
-          watched: sessions.watched,
-        })
-        .from(sessions)
-        .where(and(eq(sessions.serverId, serverId), inArray(sessions.externalSessionId, refIds)));
-
-      const map = new Map<string, ExistingSession>();
-      for (const s of existing) {
-        if (s.externalSessionId) {
-          map.set(s.externalSessionId, s);
-        }
-      }
-      return map;
-    };
-
-    // Helper to query existing sessions by time-based key (fallback dedup)
-    const queryExistingByTimeKeys = async (
-      keys: Array<{ serverUserId: string; ratingKey: string; startedAt: Date }>
-    ): Promise<Map<string, ExistingSession>> => {
-      if (keys.length === 0) return new Map();
-
-      // Build OR conditions for each key
-      // This is less efficient than IN but necessary for composite key matching
-      const existing = await db
-        .select({
-          id: sessions.id,
-          externalSessionId: sessions.externalSessionId,
-          ratingKey: sessions.ratingKey,
-          startedAt: sessions.startedAt,
-          serverUserId: sessions.serverUserId,
-          totalDurationMs: sessions.totalDurationMs,
-          stoppedAt: sessions.stoppedAt,
-          durationMs: sessions.durationMs,
-          pausedDurationMs: sessions.pausedDurationMs,
-          watched: sessions.watched,
-        })
-        .from(sessions)
-        .where(
-          and(
-            eq(sessions.serverId, serverId),
-            inArray(
-              sessions.ratingKey,
-              keys.map((k) => k.ratingKey)
-            ),
-            inArray(sessions.serverUserId, [...new Set(keys.map((k) => k.serverUserId))])
-          )
-        );
-
-      const map = new Map<string, ExistingSession>();
-      for (const s of existing) {
-        if (s.ratingKey && s.serverUserId && s.startedAt) {
-          const timeKey = `${s.serverUserId}:${s.ratingKey}:${s.startedAt.getTime()}`;
-          map.set(timeKey, s);
-        }
-      }
-      return map;
-    };
+    // Track skipped users using shared module
+    const skippedUserTracker = createSkippedUserTracker();
 
     console.log('[Import] Using per-page dedup queries (memory-efficient mode)');
 
-    // === OPTIMIZATION: GeoIP cache (bounded - cleared every 50 pages to prevent unbounded growth) ===
+    // GeoIP cache (bounded - cleared every 10 pages to prevent unbounded growth)
     let geoCache = new Map<string, ReturnType<typeof geoipService.lookup>>();
 
-    // === OPTIMIZATION: Batch collections ===
-    // Inserts are batched per page (100 records) and flushed at end of each page
+    // Batch collections
     const insertBatch: (typeof sessions.$inferInsert)[] = [];
-
-    // Update batches - collected and flushed per page
-    interface SessionUpdate {
-      id: string;
-      externalSessionId?: string;
-      stoppedAt: Date;
-      durationMs: number;
-      pausedDurationMs: number;
-      watched: boolean;
-      progressMs?: number;
-    }
     const updateBatch: SessionUpdate[] = [];
 
     let imported = 0;
@@ -498,45 +391,17 @@ export class TautulliService {
     let errors = 0;
     let page = 0;
 
-    // Track skipped users for warning message
-    const skippedUsers = new Map<number, { username: string; count: number }>();
+    // Throttle tracking for progress updates
+    let lastProgressTime = Date.now();
 
-    // Helper to flush batches
+    // Helper to flush batches using shared modules
     const flushBatches = async () => {
-      // Flush inserts in chunks (drizzle-orm has stack overflow with large arrays due to spread operator)
-      // See: https://github.com/drizzle-team/drizzle-orm/issues/1740
       if (insertBatch.length > 0) {
-        const INSERT_CHUNK_SIZE = 500;
-        for (let i = 0; i < insertBatch.length; i += INSERT_CHUNK_SIZE) {
-          const chunk = insertBatch.slice(i, i + INSERT_CHUNK_SIZE);
-          await db.insert(sessions).values(chunk);
-        }
+        await flushInsertBatch(insertBatch);
         insertBatch.length = 0;
       }
-
-      // Flush updates in parallel chunks (much faster than sequential transaction)
-      // Each update is independent, so we can safely parallelize
-      // Pool has max 20 connections - keep chunk size within pool limits to avoid exhaustion
       if (updateBatch.length > 0) {
-        const UPDATE_CHUNK_SIZE = 10;
-        for (let i = 0; i < updateBatch.length; i += UPDATE_CHUNK_SIZE) {
-          const chunk = updateBatch.slice(i, i + UPDATE_CHUNK_SIZE);
-          await Promise.all(
-            chunk.map((update) =>
-              db
-                .update(sessions)
-                .set({
-                  externalSessionId: update.externalSessionId,
-                  stoppedAt: update.stoppedAt,
-                  durationMs: update.durationMs,
-                  pausedDurationMs: update.pausedDurationMs,
-                  watched: update.watched,
-                  progressMs: update.progressMs,
-                })
-                .where(eq(sessions.id, update.id))
-            )
-          );
-        }
+        await flushUpdateBatch(updateBatch);
         updateBatch.length = 0;
       }
     };
@@ -557,8 +422,7 @@ export class TautulliService {
       // Track actual records fetched (may differ from API total if records changed)
       progress.fetchedRecords += records.length;
 
-      // === MEMORY OPTIMIZATION: Per-page dedup queries ===
-      // Extract all reference IDs from this page for batch dedup query
+      // === Per-page dedup queries using shared modules ===
       const pageRefIds: string[] = [];
       const pageTimeKeys: Array<{ serverUserId: string; ratingKey: string; startedAt: Date }> = [];
 
@@ -566,7 +430,6 @@ export class TautulliService {
         if (record.reference_id !== null) {
           pageRefIds.push(String(record.reference_id));
         }
-        // Collect time-based keys for fallback dedup
         const serverUserId = userMap.get(record.user_id);
         const ratingKey = typeof record.rating_key === 'number' ? String(record.rating_key) : null;
         if (serverUserId && ratingKey) {
@@ -578,9 +441,9 @@ export class TautulliService {
         }
       }
 
-      // Query existing sessions for this page (2 queries per page max)
-      const sessionByExternalId = await queryExistingByRefIds(pageRefIds);
-      const sessionByTimeKey = await queryExistingByTimeKeys(pageTimeKeys);
+      // Query existing sessions for this page using shared modules
+      const sessionByExternalId = await queryExistingByExternalIds(serverId, pageRefIds);
+      const sessionByTimeKey = await queryExistingByTimeKeys(serverId, pageTimeKeys);
 
       for (const record of records) {
         progress.processedRecords++;
@@ -589,16 +452,10 @@ export class TautulliService {
           // Find Tracearr server user by Plex user ID
           const serverUserId = userMap.get(record.user_id);
           if (!serverUserId) {
-            // User not found in Tracearr - track for warning
-            const existing = skippedUsers.get(record.user_id);
-            if (existing) {
-              existing.count++;
-            } else {
-              skippedUsers.set(record.user_id, {
-                username: record.friendly_name || record.user || 'Unknown',
-                count: 1,
-              });
-            }
+            skippedUserTracker.track(
+              record.user_id,
+              record.friendly_name || record.user || 'Unknown'
+            );
             skipped++;
             progress.skippedRecords++;
             progress.unknownUserRecords++;
@@ -626,7 +483,7 @@ export class TautulliService {
           // Check if exists in database (per-page query result)
           const existingByRef = sessionByExternalId.get(referenceIdStr);
           if (existingByRef) {
-            // Calculate new values - use started + duration for accurate concurrent calculations
+            // Calculate new values
             const newStoppedAt = new Date((record.started + record.duration) * 1000);
             const newDurationMs = record.duration * 1000;
             const newPausedDurationMs = record.paused_counter * 1000;
@@ -653,7 +510,6 @@ export class TautulliService {
               updated++;
               progress.updatedRecords++;
             } else {
-              // No changes needed - true duplicate
               skipped++;
               progress.skippedRecords++;
               progress.duplicateRecords++;
@@ -667,27 +523,22 @@ export class TautulliService {
             typeof record.rating_key === 'number' ? String(record.rating_key) : null;
 
           if (ratingKeyStr) {
-            const timeKey = `${serverUserId}:${ratingKeyStr}:${startedAt.getTime()}`;
-            const existingByTime = sessionByTimeKey.get(timeKey);
+            const timeKeyStr = createTimeKey(serverUserId, ratingKeyStr, startedAt);
+            const existingByTime = sessionByTimeKey.get(timeKeyStr);
 
             if (existingByTime) {
-              // Calculate new values - use started + duration for accurate concurrent calculations
               const newStoppedAt = new Date((record.started + record.duration) * 1000);
               const newDurationMs = record.duration * 1000;
               const newPausedDurationMs = record.paused_counter * 1000;
               const newWatched = record.watched_status === 1;
 
-              // Check if externalSessionId needs to be set (fallback match means it was missing)
               const needsExternalId = !existingByTime.externalSessionId;
-
-              // Check if other fields changed
               const stoppedAtChanged =
                 existingByTime.stoppedAt?.getTime() !== newStoppedAt.getTime();
               const durationChanged = existingByTime.durationMs !== newDurationMs;
               const pausedChanged = existingByTime.pausedDurationMs !== newPausedDurationMs;
               const watchedChanged = existingByTime.watched !== newWatched;
 
-              // Only update if externalSessionId is missing OR something actually changed
               if (
                 needsExternalId ||
                 stoppedAtChanged ||
@@ -706,7 +557,6 @@ export class TautulliService {
                 updated++;
                 progress.updatedRecords++;
               } else {
-                // No changes needed - true duplicate
                 skipped++;
                 progress.skippedRecords++;
                 progress.duplicateRecords++;
@@ -715,7 +565,7 @@ export class TautulliService {
             }
           }
 
-          // === OPTIMIZATION: Cached GeoIP lookup ===
+          // Cached GeoIP lookup
           const ipForLookup = record.ip_address ?? '0.0.0.0';
           let geo = geoCache.get(ipForLookup);
           if (!geo) {
@@ -739,7 +589,7 @@ export class TautulliService {
           // Track this insert to prevent duplicates within this import run
           insertedThisRun.add(referenceIdStr);
 
-          // === OPTIMIZATION: Collect insert instead of executing ===
+          // Collect insert
           insertBatch.push({
             serverId,
             serverUserId,
@@ -757,8 +607,6 @@ export class TautulliService {
             thumbPath: record.thumb || null,
             startedAt,
             lastSeenAt: startedAt,
-            // Use started + duration as effective stop time for accurate concurrent stream calculations
-            // Tautulli's `stopped` represents wall-clock time which can span days/months if user paused/resumed
             stoppedAt: new Date((record.started + record.duration) * 1000),
             durationMs: record.duration * 1000,
             totalDurationMs: null,
@@ -777,8 +625,6 @@ export class TautulliService {
             platform: record.platform,
             quality: record.transcode_decision === 'transcode' ? 'Transcode' : 'Direct',
             isTranscode: record.transcode_decision === 'transcode',
-            // Tautulli only provides combined decision - use same value for both
-            // 'direct play' → 'directplay' to match Plex/Jellyfin format
             videoDecision:
               record.transcode_decision === 'direct play'
                 ? 'directplay'
@@ -798,10 +644,10 @@ export class TautulliService {
           progress.errorRecords++;
         }
 
-        // === OPTIMIZATION: Throttled progress updates ===
+        // Throttled progress updates
         const now = Date.now();
         if (progress.processedRecords % 100 === 0 || now - lastProgressTime > 2000) {
-          publishProgress();
+          publishProgress(progress);
           lastProgressTime = now;
         }
       }
@@ -817,7 +663,7 @@ export class TautulliService {
 
     // Refresh TimescaleDB aggregates so imported data appears in stats immediately
     progress.message = 'Refreshing aggregates...';
-    publishProgress();
+    publishProgress(progress);
     try {
       await refreshAggregates();
     } catch (err) {
@@ -833,25 +679,22 @@ export class TautulliService {
 
     let message = `Import complete: ${parts.join(', ')}`;
 
-    if (skippedUsers.size > 0) {
-      const skippedUserList = [...skippedUsers.values()]
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5) // Show top 5 skipped users
-        .map((u) => `${u.username} (${u.count} records)`)
-        .join(', ');
-
-      const moreUsers = skippedUsers.size > 5 ? ` and ${skippedUsers.size - 5} more` : '';
-      message += `. Warning: ${skippedUsers.size} users not found in Tracearr: ${skippedUserList}${moreUsers}. Sync your server to import these users first.`;
-
+    // Add skipped users warning using shared module
+    const skippedUserWarning = skippedUserTracker.formatWarning();
+    if (skippedUserWarning) {
+      message += `. Warning: ${skippedUserWarning}`;
       console.warn(
-        `Tautulli import skipped users: ${[...skippedUsers.values()].map((u) => u.username).join(', ')}`
+        `Tautulli import skipped users: ${skippedUserTracker
+          .getAll()
+          .map((u) => u.username)
+          .join(', ')}`
       );
     }
 
     // Final progress update
     progress.status = 'complete';
     progress.message = message;
-    publishProgress();
+    publishProgress(progress);
 
     return {
       success: true,
@@ -861,11 +704,11 @@ export class TautulliService {
       errors,
       message,
       skippedUsers:
-        skippedUsers.size > 0
-          ? [...skippedUsers.entries()].map(([id, data]) => ({
-              tautulliUserId: id,
-              username: data.username,
-              recordCount: data.count,
+        skippedUserTracker.size > 0
+          ? skippedUserTracker.getAll().map((u) => ({
+              tautulliUserId: parseInt(u.externalId, 10),
+              username: u.username ?? 'Unknown',
+              recordCount: u.count,
             }))
           : undefined,
     };
