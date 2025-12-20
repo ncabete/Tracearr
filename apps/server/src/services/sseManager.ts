@@ -192,7 +192,9 @@ export class SSEManager extends EventEmitter {
    */
   async removeServer(serverId: string): Promise<void> {
     if (this.pendingOperations.has(serverId)) {
-      console.log(`[SSEManager] Operation already in progress for server ${serverId}, skipping remove`);
+      console.log(
+        `[SSEManager] Operation already in progress for server ${serverId}, skipping remove`
+      );
       return;
     }
     this.pendingOperations.add(serverId);
@@ -343,7 +345,9 @@ export class SSEManager extends EventEmitter {
    */
   async reconnect(serverId: string): Promise<void> {
     if (this.pendingOperations.has(serverId)) {
-      console.log(`[SSEManager] Operation already in progress for server ${serverId}, skipping reconnect`);
+      console.log(
+        `[SSEManager] Operation already in progress for server ${serverId}, skipping reconnect`
+      );
       return;
     }
     this.pendingOperations.add(serverId);

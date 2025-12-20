@@ -228,13 +228,10 @@ export class EmbyClient implements IMediaServerClient, IMediaServerClientWithHis
       Fields: 'ProductionYear,ParentIndexNumber,IndexNumber',
     });
 
-    const data = await fetchJson<{ Items?: unknown[] }>(
-      `${this.baseUrl}/Items?${params}`,
-      {
-        headers: this.buildHeaders(),
-        service: 'emby',
-      }
-    );
+    const data = await fetchJson<{ Items?: unknown[] }>(`${this.baseUrl}/Items?${params}`, {
+      headers: this.buildHeaders(),
+      service: 'emby',
+    });
 
     return parseItemsResponse(data);
   }

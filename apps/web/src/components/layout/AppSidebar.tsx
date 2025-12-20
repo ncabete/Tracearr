@@ -92,9 +92,7 @@ function VersionDisplay() {
     return <div className="text-muted-foreground text-xs">Loading...</div>;
   }
 
-  const displayVersion = version.current.tag
-    ? `${version.current.tag}`
-    : `v${version.current.version}`;
+  const displayVersion = version.current.tag ?? `v${version.current.version}`;
 
   return (
     <div className="flex flex-col gap-1">

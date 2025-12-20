@@ -320,13 +320,12 @@ export const tautulliImportSchema = z.object({
  * PlayState object from Jellystat backup
  * Uses loose() to allow extra fields that Jellystat may include
  */
-export const jellystatPlayStateSchema = z
-  .looseObject({
-    IsPaused: z.boolean().nullable().optional(),
-    PositionTicks: z.number().nullable().optional(),
-    RuntimeTicks: z.number().nullable().optional(),
-    Completed: z.boolean().nullable().optional(),
-  }); // Allow extra fields like IsMuted, VolumeLevel, CanSeek, etc.
+export const jellystatPlayStateSchema = z.looseObject({
+  IsPaused: z.boolean().nullable().optional(),
+  PositionTicks: z.number().nullable().optional(),
+  RuntimeTicks: z.number().nullable().optional(),
+  Completed: z.boolean().nullable().optional(),
+}); // Allow extra fields like IsMuted, VolumeLevel, CanSeek, etc.
 
 /**
  * TranscodingInfo object from Jellystat backup

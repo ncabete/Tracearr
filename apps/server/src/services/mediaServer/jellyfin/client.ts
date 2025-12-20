@@ -225,13 +225,10 @@ export class JellyfinClient implements IMediaServerClient, IMediaServerClientWit
       Fields: 'ProductionYear,ParentIndexNumber,IndexNumber',
     });
 
-    const data = await fetchJson<{ Items?: unknown[] }>(
-      `${this.baseUrl}/Items?${params}`,
-      {
-        headers: this.buildHeaders(),
-        service: 'jellyfin',
-      }
-    );
+    const data = await fetchJson<{ Items?: unknown[] }>(`${this.baseUrl}/Items?${params}`, {
+      headers: this.buildHeaders(),
+      service: 'jellyfin',
+    });
 
     return parseItemsResponse(data);
   }
