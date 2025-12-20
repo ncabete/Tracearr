@@ -353,7 +353,17 @@ export const jellystatPlaybackActivitySchema = z.looseObject({
   EpisodeId: z.string().nullable().optional(),
   PlaybackDuration: z.union([z.string(), z.number()]), // Can be string or number
   ActivityDateInserted: z.string(), // ISO 8601 timestamp
-  PlayMethod: z.enum(['DirectPlay', 'DirectStream', 'Transcode']).nullable().optional(),
+  PlayMethod: z
+    .string()
+    .refine(
+      (val) => val === 'DirectPlay' || val === 'DirectStream' || val.startsWith('Transcode'),
+      {
+        message:
+          'PlayMethod must be DirectPlay, DirectStream, or Transcode (with optional codec info)',
+      }
+    )
+    .nullable()
+    .optional(),
   PlayState: jellystatPlayStateSchema.nullable().optional(),
   TranscodingInfo: jellystatTranscodingInfoSchema,
   RemoteEndPoint: z.string().nullable().optional(),
