@@ -166,8 +166,15 @@
     {
       "idx": 23,
       "version": "7",
-      "when": 1766200941227,
-      "tag": "0023_thankful_ultragirl",
+      "when": 1766260334560,
+      "tag": "0023_demonic_tag",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1766265639534,
+      "tag": "0024_small_karma",
       "breakpoints": true
     }
   ]

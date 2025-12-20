@@ -102,6 +102,7 @@ function parseFiltersFromUrl(searchParams: URLSearchParams): HistoryFilters {
 
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
+  const period = searchParams.get('period');
 
   if (startDate) {
     const parsed = new Date(startDate);
@@ -113,8 +114,9 @@ function parseFiltersFromUrl(searchParams: URLSearchParams): HistoryFilters {
     if (!isNaN(parsed.getTime())) filters.endDate = parsed;
   }
 
-  // Default to 30d if no date range specified
-  if (!filters.startDate && !filters.endDate) {
+  // Default to 30d only on fresh page load (no period param)
+  // If period=all, user explicitly wants all data
+  if (!filters.startDate && !filters.endDate && period !== 'all') {
     const now = new Date();
     filters.startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     filters.endDate = now;
@@ -152,6 +154,7 @@ function filtersToUrlParams(filters: HistoryFilters): URLSearchParams {
   if (filters.search) params.set('search', filters.search);
   if (filters.startDate) params.set('startDate', filters.startDate.toISOString());
   if (filters.endDate) params.set('endDate', filters.endDate.toISOString());
+  if (!filters.startDate && !filters.endDate) params.set('period', 'all');
   if (filters.watched !== undefined) params.set('watched', String(filters.watched));
   if (filters.orderBy && filters.orderBy !== 'startedAt') params.set('orderBy', filters.orderBy);
   if (filters.orderDir && filters.orderDir !== 'desc') params.set('orderDir', filters.orderDir);

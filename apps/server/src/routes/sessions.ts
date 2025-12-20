@@ -775,15 +775,22 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    if (startDate && endDate) {
+    if (startDate) {
       serverConditions.push(sql`s.started_at >= ${startDate}`);
-      serverConditions.push(sql`s.started_at <= ${endDate}`);
-    } else if (startDate) {
-      serverConditions.push(sql`s.started_at >= ${startDate}`);
-    } else if (endDate) {
-      serverConditions.push(sql`s.started_at <= ${endDate}`);
+    }
+    if (endDate) {
+      const endOfDay = new Date(endDate);
+      endOfDay.setHours(23, 59, 59, 999);
+      serverConditions.push(sql`s.started_at <= ${endOfDay}`);
     }
 
+    // Helper to build WHERE clause with additional conditions
+    const buildWhereWithCondition = (extraCondition: ReturnType<typeof sql>) => {
+      const allConditions = [...serverConditions, extraCondition];
+      return sql`WHERE ${sql.join(allConditions, sql` AND `)}`;
+    };
+
+    // For users query, no extra NOT NULL condition needed (uses JOIN)
     const whereClause =
       serverConditions.length > 0 ? sql`WHERE ${sql.join(serverConditions, sql` AND `)}` : sql``;
 
@@ -800,8 +807,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       db.execute(sql`
             SELECT platform as value, COUNT(DISTINCT COALESCE(reference_id, id))::int as count
             FROM sessions s
-            ${whereClause}
-            AND platform IS NOT NULL
+            ${buildWhereWithCondition(sql`platform IS NOT NULL`)}
             GROUP BY platform
             ORDER BY count DESC
             LIMIT 50
@@ -810,8 +816,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       db.execute(sql`
             SELECT product as value, COUNT(DISTINCT COALESCE(reference_id, id))::int as count
             FROM sessions s
-            ${whereClause}
-            AND product IS NOT NULL
+            ${buildWhereWithCondition(sql`product IS NOT NULL`)}
             GROUP BY product
             ORDER BY count DESC
             LIMIT 50
@@ -820,8 +825,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       db.execute(sql`
             SELECT device as value, COUNT(DISTINCT COALESCE(reference_id, id))::int as count
             FROM sessions s
-            ${whereClause}
-            AND device IS NOT NULL
+            ${buildWhereWithCondition(sql`device IS NOT NULL`)}
             GROUP BY device
             ORDER BY count DESC
             LIMIT 50
@@ -830,8 +834,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       db.execute(sql`
             SELECT geo_country as value, COUNT(DISTINCT COALESCE(reference_id, id))::int as count
             FROM sessions s
-            ${whereClause}
-            AND geo_country IS NOT NULL
+            ${buildWhereWithCondition(sql`geo_country IS NOT NULL`)}
             GROUP BY geo_country
             ORDER BY count DESC
             LIMIT 250
@@ -840,8 +843,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       db.execute(sql`
             SELECT geo_city as value, COUNT(DISTINCT COALESCE(reference_id, id))::int as count
             FROM sessions s
-            ${whereClause}
-            AND geo_city IS NOT NULL
+            ${buildWhereWithCondition(sql`geo_city IS NOT NULL`)}
             GROUP BY geo_city
             ORDER BY count DESC
             LIMIT 100
