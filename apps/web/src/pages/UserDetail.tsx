@@ -84,6 +84,11 @@ const sessionColumns: ColumnDef<Session>[] = [
     ),
   },
   {
+    accessorKey: 'ipAddress',
+    header: 'IP Address',
+    cell: ({ row }) => <span className="text-sm">{row.original.ipAddress ?? 'Unknown'}</span>,
+  },
+  {
     accessorKey: 'geoCity',
     header: 'Location',
     cell: ({ row }) => {
