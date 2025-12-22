@@ -95,15 +95,24 @@ function getBitrate(session: Record<string, unknown>): number {
 }
 
 /**
- * Get video height from Jellyfin session for resolution display
+ * Get video dimensions from Jellyfin session for resolution display
  * Checks TranscodingInfo first (for transcoded resolution), then falls back to source
  */
-function getVideoHeight(session: Record<string, unknown>): number | undefined {
+function getVideoDimensions(session: Record<string, unknown>): {
+  videoWidth?: number;
+  videoHeight?: number;
+} {
   // Check transcoding info first for transcoded resolution
   const transcodingInfo = getNestedObject(session, 'TranscodingInfo');
   if (transcodingInfo) {
+    const width = parseOptionalNumber(transcodingInfo.Width);
     const height = parseOptionalNumber(transcodingInfo.Height);
-    if (height && height > 0) return height;
+    if ((width && width > 0) || (height && height > 0)) {
+      return {
+        videoWidth: width && width > 0 ? width : undefined,
+        videoHeight: height && height > 0 ? height : undefined,
+      };
+    }
   }
 
   // Fall back to source video stream resolution
@@ -117,14 +126,20 @@ function getVideoHeight(session: Record<string, unknown>): number | undefined {
       for (const stream of mediaStreams) {
         const streamObj = stream as Record<string, unknown>;
         if (parseOptionalString(streamObj.Type)?.toLowerCase() === 'video') {
+          const width = parseOptionalNumber(streamObj.Width);
           const height = parseOptionalNumber(streamObj.Height);
-          if (height && height > 0) return height;
+          if ((width && width > 0) || (height && height > 0)) {
+            return {
+              videoWidth: width && width > 0 ? width : undefined,
+              videoHeight: height && height > 0 ? height : undefined,
+            };
+          }
         }
       }
     }
   }
 
-  return undefined;
+  return {};
 }
 
 /**
@@ -304,7 +319,7 @@ export function parseSession(session: Record<string, unknown>): MediaSession | n
       isTranscode,
       videoDecision,
       audioDecision,
-      videoHeight: getVideoHeight(session),
+      ...getVideoDimensions(session),
     },
     // Jellyfin provides exact pause timestamp for accurate tracking
     lastPausedDate,

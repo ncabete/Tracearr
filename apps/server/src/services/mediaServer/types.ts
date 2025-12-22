@@ -96,7 +96,9 @@ export interface MediaSession {
     audioDecision: string;
     /** Video resolution (e.g., "4k", "1080", "720", "480", "sd") */
     videoResolution?: string;
-    /** Video height in pixels (for calculating resolution) */
+    /** Video width in pixels (preferred for resolution calculation - handles widescreen) */
+    videoWidth?: number;
+    /** Video height in pixels (fallback for resolution calculation) */
     videoHeight?: number;
   };
 

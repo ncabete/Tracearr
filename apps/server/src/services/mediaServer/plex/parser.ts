@@ -107,6 +107,7 @@ export function parseSession(item: Record<string, unknown>): MediaSession {
   const videoResolution = parseOptionalString(
     parseFirstArrayElement(item.Media, 'videoResolution')
   );
+  const videoWidth = parseOptionalNumber(parseFirstArrayElement(item.Media, 'width'));
   const videoHeight = parseOptionalNumber(parseFirstArrayElement(item.Media, 'height'));
 
   // Determine transcode status - check both video and audio decisions
@@ -158,6 +159,7 @@ export function parseSession(item: Record<string, unknown>): MediaSession {
       videoDecision,
       audioDecision,
       videoResolution,
+      videoWidth,
       videoHeight,
     },
     // Plex termination API requires Session.id, not sessionKey

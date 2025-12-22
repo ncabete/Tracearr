@@ -97,6 +97,54 @@ function getBitrate(session: Record<string, unknown>): number {
 }
 
 /**
+ * Get video dimensions from Emby session for resolution display
+ * Checks TranscodingInfo first (for transcoded resolution), then falls back to source
+ */
+function getVideoDimensions(session: Record<string, unknown>): {
+  videoWidth?: number;
+  videoHeight?: number;
+} {
+  // Check transcoding info first for transcoded resolution
+  const transcodingInfo = getNestedObject(session, 'TranscodingInfo');
+  if (transcodingInfo) {
+    const width = parseOptionalNumber(transcodingInfo.Width);
+    const height = parseOptionalNumber(transcodingInfo.Height);
+    if ((width && width > 0) || (height && height > 0)) {
+      return {
+        videoWidth: width && width > 0 ? width : undefined,
+        videoHeight: height && height > 0 ? height : undefined,
+      };
+    }
+  }
+
+  // Fall back to source video stream resolution
+  const nowPlaying = getNestedObject(session, 'NowPlayingItem');
+  const mediaSources = nowPlaying?.MediaSources;
+  if (Array.isArray(mediaSources) && mediaSources.length > 0) {
+    const firstSource = mediaSources[0] as Record<string, unknown>;
+    const mediaStreams = firstSource?.MediaStreams;
+    if (Array.isArray(mediaStreams)) {
+      // Find the video stream (Type === 'Video')
+      for (const stream of mediaStreams) {
+        const streamObj = stream as Record<string, unknown>;
+        if (parseOptionalString(streamObj.Type)?.toLowerCase() === 'video') {
+          const width = parseOptionalNumber(streamObj.Width);
+          const height = parseOptionalNumber(streamObj.Height);
+          if ((width && width > 0) || (height && height > 0)) {
+            return {
+              videoWidth: width && width > 0 ? width : undefined,
+              videoHeight: height && height > 0 ? height : undefined,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return {};
+}
+
+/**
  * Get play method from PlayState and normalize to lowercase
  * PlayMethod enum: DirectPlay, DirectStream, Transcode
  */
@@ -260,6 +308,7 @@ export function parseSession(session: Record<string, unknown>): MediaSession | n
       isTranscode,
       videoDecision,
       audioDecision,
+      ...getVideoDimensions(session),
     },
   };
 
