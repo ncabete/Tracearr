@@ -10,82 +10,8 @@ import type { Session } from '@tracearr/shared';
 import type { MediaSession } from '../../services/mediaServer/types.js';
 import type { ProcessedSession } from './types.js';
 import { normalizeClient } from '../../utils/platformNormalizer.js';
+import { formatQualityString } from '../../utils/resolutionNormalizer.js';
 import type { sessions } from '../../db/schema.js';
-
-// ============================================================================
-// Quality Formatting
-// ============================================================================
-
-/**
- * Format video resolution to a user-friendly string
- * Normalizes various resolution formats to standard labels
- *
- * @param resolution - Raw resolution string from API (e.g., "4k", "1080", "720p", "sd")
- * @param height - Video height in pixels as fallback
- * @returns Formatted resolution string (e.g., "4K", "1080p", "720p", "SD")
- */
-function formatResolution(resolution?: string, height?: number): string | null {
-  if (resolution) {
-    const lower = resolution.toLowerCase();
-    // Handle "4k" or "2160" resolution
-    if (lower === '4k' || lower === '2160' || lower === '2160p') {
-      return '4K';
-    }
-    // Handle standard numeric resolutions
-    if (lower === '1080' || lower === '1080p') {
-      return '1080p';
-    }
-    if (lower === '720' || lower === '720p') {
-      return '720p';
-    }
-    if (lower === '480' || lower === '480p') {
-      return '480p';
-    }
-    if (lower === 'sd') {
-      return 'SD';
-    }
-    // Return the original with 'p' suffix if it looks numeric
-    if (/^\d+$/.test(lower)) {
-      return `${lower}p`;
-    }
-    // Return as-is if it's already formatted (e.g., "1080p")
-    return resolution;
-  }
-
-  // Fall back to height-based resolution
-  if (height) {
-    if (height >= 2160) return '4K';
-    if (height >= 1080) return '1080p';
-    if (height >= 720) return '720p';
-    if (height >= 480) return '480p';
-    return 'SD';
-  }
-
-  return null;
-}
-
-/**
- * Build quality display string from session quality data
- * Prefers resolution over bitrate for clarity
- *
- * @param quality - Session quality object from MediaSession
- * @returns Quality string for display (e.g., "4K", "1080p", "54Mbps", "Direct")
- */
-function formatQualityString(quality: MediaSession['quality']): string {
-  // Prefer resolution-based display
-  const resolution = formatResolution(quality.videoResolution, quality.videoHeight);
-  if (resolution) {
-    return resolution;
-  }
-
-  // Fall back to bitrate if available
-  if (quality.bitrate > 0) {
-    return `${Math.round(quality.bitrate / 1000)}Mbps`;
-  }
-
-  // Last resort: transcode status
-  return quality.isTranscode ? 'Transcoding' : 'Direct';
-}
 
 // ============================================================================
 // MediaSession → ProcessedSession Mapping

@@ -466,7 +466,7 @@ describe('GeoIPService', () => {
     it('should return Local location for private IPs (without database)', () => {
       const result = service.lookup('192.168.1.1');
 
-      expect(result.city).toBe('Local');
+      expect(result.city).toBeNull();
       expect(result.country).toBe('Local Network');
       expect(result.lat).toBeNull();
       expect(result.lon).toBeNull();
@@ -475,7 +475,7 @@ describe('GeoIPService', () => {
     it('should return Local location for loopback', () => {
       const result = service.lookup('127.0.0.1');
 
-      expect(result.city).toBe('Local');
+      expect(result.city).toBeNull();
       expect(result.country).toBe('Local Network');
     });
 
@@ -493,14 +493,14 @@ describe('GeoIPService', () => {
     it('should return Local for IPv6 loopback', () => {
       const result = service.lookup('::1');
 
-      expect(result.city).toBe('Local');
+      expect(result.city).toBeNull();
       expect(result.country).toBe('Local Network');
     });
 
     it('should return Local for IPv6 link-local', () => {
       const result = service.lookup('fe80::1');
 
-      expect(result.city).toBe('Local');
+      expect(result.city).toBeNull();
       expect(result.country).toBe('Local Network');
     });
   });

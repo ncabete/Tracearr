@@ -13,6 +13,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { sessions } from '../../db/schema.js';
+import { normalizeClient, normalizePlatformName } from '../../utils/platformNormalizer.js';
 
 // Default chunk sizes
 const DEFAULT_INSERT_CHUNK_SIZE = 500;
@@ -53,7 +54,35 @@ export interface UpdateBatchOptions {
 }
 
 /**
+ * Normalize session device/platform fields before insert
+ */
+function normalizeSessionFields(session: NewSession): NewSession {
+  // Get the client string to normalize (prefer product, fallback to playerName)
+  const clientString = session.product || session.playerName || '';
+
+  if (!clientString && !session.platform) {
+    return session;
+  }
+
+  // Normalize client info (derives device from client string)
+  const normalized = normalizeClient(clientString);
+
+  // For platform: if we have an existing value, normalize it; otherwise use derived
+  const normalizedPlatform = session.platform
+    ? normalizePlatformName(session.platform)
+    : normalized.platform;
+
+  return {
+    ...session,
+    device: normalized.device,
+    platform: normalizedPlatform,
+  };
+}
+
+/**
  * Insert sessions in chunks to avoid Drizzle ORM stack overflow
+ *
+ * Automatically normalizes device/platform fields before insert.
  *
  * @param sessionsToInsert - Array of session records to insert
  * @param options - Options for batch processing
@@ -68,8 +97,11 @@ export async function flushInsertBatch(
   const chunkSize = options.chunkSize ?? DEFAULT_INSERT_CHUNK_SIZE;
   let insertedCount = 0;
 
-  for (let i = 0; i < sessionsToInsert.length; i += chunkSize) {
-    const chunk = sessionsToInsert.slice(i, i + chunkSize);
+  // Normalize all sessions before insert
+  const normalizedSessions = sessionsToInsert.map(normalizeSessionFields);
+
+  for (let i = 0; i < normalizedSessions.length; i += chunkSize) {
+    const chunk = normalizedSessions.slice(i, i + chunkSize);
     await db.insert(sessions).values(chunk);
     insertedCount += chunk.length;
   }

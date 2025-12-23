@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { ActiveSession, LocationStats } from '@tracearr/shared';
-import { cn } from '@/lib/utils';
+import { cn, getCountryName } from '@/lib/utils';
 import { ActiveSessionBadge } from '@/components/sessions/ActiveSessionBadge';
 import { useTheme } from '@/components/theme-provider';
 import { User, MapPin } from 'lucide-react';
@@ -247,7 +247,9 @@ export function StreamCard({ sessions, locations, className, height = 300 }: Str
                     {(session.geoCity || session.geoCountry) && (
                       <>
                         <MapPin className="h-3 w-3 flex-shrink-0" />
-                        <span className="truncate">{session.geoCity || session.geoCountry}</span>
+                        <span className="truncate">
+                          {session.geoCity || getCountryName(session.geoCountry)}
+                        </span>
                       </>
                     )}
                     {(session.product || session.platform) && (

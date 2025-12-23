@@ -22,6 +22,7 @@ import {
   createSimpleProgressPublisher,
 } from './import/index.js';
 import { normalizePlatformName } from '../utils/platformNormalizer.js';
+import { normalizeStreamDecisions } from '../utils/transcodeNormalizer.js';
 
 const PAGE_SIZE = 5000; // Larger batches = fewer API calls (tested up to 10k, scales linearly)
 const REQUEST_TIMEOUT_MS = 30000; // 30 seconds
@@ -599,7 +600,7 @@ export class TautulliService {
             externalSessionId: referenceIdStr,
             state: 'stopped',
             mediaType,
-            mediaTitle: record.full_title || record.title,
+            mediaTitle: record.title,
             grandparentTitle: record.grandparent_title || null,
             seasonNumber:
               typeof record.parent_media_index === 'number' ? record.parent_media_index : null,
@@ -610,30 +611,39 @@ export class TautulliService {
             lastSeenAt: startedAt,
             stoppedAt: new Date((record.started + record.duration) * 1000),
             durationMs: record.duration * 1000,
-            totalDurationMs: null,
-            progressMs: null,
+            // Calculate totalDurationMs from duration and percent_complete
+            // e.g., if 441s watched = 44%, total = 441/0.44 = 1002s
+            totalDurationMs:
+              record.percent_complete > 0
+                ? Math.round((record.duration * 1000 * 100) / record.percent_complete)
+                : null,
+            // For imported sessions, progressMs ≈ durationMs (assumes linear playback)
+            progressMs: record.duration * 1000,
             pausedDurationMs: record.paused_counter * 1000,
             watched: record.watched_status === 1,
             ipAddress: record.ip_address || '0.0.0.0',
             geoCity: geo.city,
             geoRegion: geo.region,
-            geoCountry: geo.country,
+            geoCountry: geo.countryCode ?? geo.country,
             geoLat: geo.lat,
             geoLon: geo.lon,
             playerName: record.player || record.product,
             deviceId: record.machine_id || null,
             product: record.product || null,
-            platform: normalizePlatformName(record.platform),
-            quality: record.transcode_decision === 'transcode' ? 'Transcode' : 'Direct',
-            isTranscode: record.transcode_decision === 'transcode',
-            videoDecision:
-              record.transcode_decision === 'direct play'
-                ? 'directplay'
-                : record.transcode_decision,
-            audioDecision:
-              record.transcode_decision === 'direct play'
-                ? 'directplay'
-                : record.transcode_decision,
+            platform: normalizePlatformName(record.platform || ''),
+            // Tautulli uses single transcode_decision for both video/audio
+            ...(() => {
+              const { videoDecision, audioDecision, isTranscode } = normalizeStreamDecisions(
+                record.transcode_decision,
+                record.transcode_decision
+              );
+              return {
+                quality: isTranscode ? 'Transcode' : 'Direct',
+                isTranscode,
+                videoDecision,
+                audioDecision,
+              };
+            })(),
             bitrate: null,
           });
 

@@ -28,7 +28,7 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
   // Register multipart plugin for file uploads (Jellystat backup)
   await app.register(multipart, {
     limits: {
-      fileSize: 100 * 1024 * 1024, // 100MB max file size
+      fileSize: 500 * 1024 * 1024, // 500MB max file size
     },
   });
 

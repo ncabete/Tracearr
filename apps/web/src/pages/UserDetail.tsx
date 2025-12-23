@@ -9,6 +9,7 @@ import { EditUserNameDialog } from '@/components/users/EditUserNameDialog';
 import { SeverityBadge } from '@/components/violations/SeverityBadge';
 import { ActiveSessionBadge } from '@/components/sessions/ActiveSessionBadge';
 import { getAvatarUrl } from '@/components/users/utils';
+import { getCountryName } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -101,7 +102,7 @@ const sessionColumns: ColumnDef<Session>[] = [
           <Globe className="text-muted-foreground h-4 w-4" />
           <span>
             {session.geoCity && `${session.geoCity}, `}
-            {session.geoCountry ?? ''}
+            {getCountryName(session.geoCountry) ?? ''}
           </span>
         </div>
       );

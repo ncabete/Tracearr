@@ -32,6 +32,7 @@ import type {
   DashboardStats,
   TautulliImportProgress,
   JellystatImportProgress,
+  MaintenanceJobProgress,
 } from '@tracearr/shared';
 
 import authPlugin from './plugins/auth.js';
@@ -52,6 +53,7 @@ import { mobileRoutes } from './routes/mobile.js';
 import { notificationPreferencesRoutes } from './routes/notificationPreferences.js';
 import { channelRoutingRoutes } from './routes/channelRouting.js';
 import { versionRoutes } from './routes/version.js';
+import { maintenanceRoutes } from './routes/maintenance.js';
 import { getPollerSettings, getNetworkSettings } from './routes/settings.js';
 import { initializeEncryption, migrateToken, looksEncrypted } from './utils/crypto.js';
 import { geoipService } from './services/geoip.js';
@@ -70,6 +72,11 @@ import {
   shutdownNotificationQueue,
 } from './jobs/notificationQueue.js';
 import { initImportQueue, startImportWorker, shutdownImportQueue } from './jobs/importQueue.js';
+import {
+  initMaintenanceQueue,
+  startMaintenanceWorker,
+  shutdownMaintenanceQueue,
+} from './jobs/maintenanceQueue.js';
 import {
   initVersionCheckQueue,
   startVersionCheckWorker,
@@ -257,6 +264,16 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     // Don't throw - imports can fall back to direct execution
   }
 
+  // Initialize maintenance queue (uses Redis for job storage)
+  try {
+    initMaintenanceQueue(redisUrl);
+    startMaintenanceWorker();
+    app.log.info('Maintenance queue initialized');
+  } catch (err) {
+    app.log.error({ err }, 'Failed to initialize maintenance queue');
+    // Don't throw - maintenance jobs are non-critical
+  }
+
   // Initialize version check queue (uses Redis for job storage and caching)
   try {
     initVersionCheckQueue(redisUrl, app.redis, pubSubService.publish.bind(pubSubService));
@@ -292,6 +309,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     stopSSEProcessor();
     await shutdownNotificationQueue();
     await shutdownImportQueue();
+    await shutdownMaintenanceQueue();
     await shutdownVersionCheckQueue();
   });
 
@@ -363,6 +381,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   await app.register(mobileRoutes, { prefix: `${API_BASE_PATH}/mobile` });
   await app.register(notificationPreferencesRoutes, { prefix: `${API_BASE_PATH}/notifications` });
   await app.register(versionRoutes, { prefix: `${API_BASE_PATH}/version` });
+  await app.register(maintenanceRoutes, { prefix: `${API_BASE_PATH}/maintenance` });
 
   // Serve static frontend in production
   const webDistPath = resolve(PROJECT_ROOT, 'apps/web/dist');
@@ -453,6 +472,9 @@ async function start() {
             break;
           case WS_EVENTS.IMPORT_JELLYSTAT_PROGRESS:
             broadcastToSessions('import:jellystat:progress', data as JellystatImportProgress);
+            break;
+          case WS_EVENTS.MAINTENANCE_PROGRESS:
+            broadcastToSessions('maintenance:progress', data as MaintenanceJobProgress);
             break;
           case WS_EVENTS.VERSION_UPDATE:
             broadcastToSessions(

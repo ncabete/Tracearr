@@ -28,7 +28,7 @@ import {
   Clock,
   ExternalLink,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, getCountryName } from '@/lib/utils';
 import { getAvatarUrl } from '@/components/users/utils';
 import { useTheme } from '@/components/theme-provider';
 import type {
@@ -204,7 +204,11 @@ export function SessionDetailSheet({ session, open, onOpenChange }: Props) {
     : null;
 
   // Build location string
-  const locationParts = [session.geoCity, session.geoRegion, session.geoCountry].filter(Boolean);
+  const locationParts = [
+    session.geoCity,
+    session.geoRegion,
+    getCountryName(session.geoCountry),
+  ].filter(Boolean);
   const locationString = locationParts.join(', ');
 
   return (
@@ -359,12 +363,9 @@ export function SessionDetailSheet({ session, open, onOpenChange }: Props) {
                 <span className="font-mono text-xs">{session.ipAddress || '—'}</span>
               </div>
               {locationString && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Location</span>
-                  <span className="flex items-center gap-1">
-                    <Globe className="text-muted-foreground h-3 w-3" />
-                    {locationString}
-                  </span>
+                <div className="flex items-center gap-1.5 text-sm">
+                  <Globe className="text-muted-foreground h-3.5 w-3.5 flex-shrink-0" />
+                  <span>{locationString}</span>
                 </div>
               )}
               {hasLocation && <MiniMap lat={session.geoLat!} lon={session.geoLon!} />}

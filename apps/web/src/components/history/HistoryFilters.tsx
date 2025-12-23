@@ -47,6 +47,7 @@ export const HISTORY_COLUMNS = [
   { id: 'content', label: 'Content', defaultVisible: true },
   { id: 'platform', label: 'Platform', defaultVisible: true },
   { id: 'location', label: 'Location', defaultVisible: true },
+  { id: 'ip', label: 'IP Address', defaultVisible: false },
   { id: 'quality', label: 'Quality', defaultVisible: true },
   { id: 'duration', label: 'Duration', defaultVisible: true },
   { id: 'progress', label: 'Progress', defaultVisible: true },

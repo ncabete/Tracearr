@@ -66,6 +66,11 @@ export type {
   // Jellystat import
   JellystatImportProgress,
   JellystatImportResult,
+  // Maintenance jobs
+  MaintenanceJobType,
+  MaintenanceJobStatus,
+  MaintenanceJobProgress,
+  MaintenanceJobResult,
   // WebSocket
   ServerToClientEvents,
   ClientToServerEvents,

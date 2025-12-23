@@ -821,6 +821,85 @@ class ApiClient {
     },
   };
 
+  // Maintenance jobs
+  maintenance = {
+    getJobs: () =>
+      this.request<{
+        jobs: Array<{
+          type: string;
+          name: string;
+          description: string;
+        }>;
+      }>('/maintenance/jobs'),
+    startJob: (type: string) =>
+      this.request<{ status: string; jobId: string; message: string }>(`/maintenance/jobs/${type}`, {
+        method: 'POST',
+        body: '{}',
+      }),
+    getProgress: () =>
+      this.request<{
+        progress: {
+          type: string;
+          status: string;
+          totalRecords: number;
+          processedRecords: number;
+          updatedRecords: number;
+          skippedRecords: number;
+          errorRecords: number;
+          message: string;
+          startedAt?: string;
+          completedAt?: string;
+        } | null;
+      }>('/maintenance/progress'),
+    getJobStatus: (jobId: string) =>
+      this.request<{
+        jobId: string;
+        state: string;
+        progress: number | object | null;
+        result?: {
+          success: boolean;
+          type: string;
+          processed: number;
+          updated: number;
+          skipped: number;
+          errors: number;
+          durationMs: number;
+          message: string;
+        };
+        failedReason?: string;
+        createdAt?: number;
+        finishedAt?: number;
+      }>(`/maintenance/jobs/${jobId}/status`),
+    getStats: () =>
+      this.request<{
+        waiting: number;
+        active: number;
+        completed: number;
+        failed: number;
+        delayed: number;
+      }>('/maintenance/stats'),
+    getHistory: () =>
+      this.request<{
+        history: Array<{
+          jobId: string;
+          type: string;
+          state: string;
+          createdAt: number;
+          finishedAt?: number;
+          result?: {
+            success: boolean;
+            type: string;
+            processed: number;
+            updated: number;
+            skipped: number;
+            errors: number;
+            durationMs: number;
+            message: string;
+          };
+        }>;
+      }>('/maintenance/history'),
+  };
+
   // Mobile access
   mobile = {
     get: () => this.request<MobileConfig>('/mobile'),

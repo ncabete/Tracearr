@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
+import { cn, getCountryName } from '@/lib/utils';
 import { useEstimatedProgress } from '@/hooks/useEstimatedProgress';
 import { useAuth } from '@/hooks/useAuth';
 import { TerminateSessionDialog } from './TerminateSessionDialog';
@@ -240,8 +240,8 @@ export function NowPlayingCard({ session, onClick }: NowPlayingCardProps) {
       <div className="bg-muted/50 text-muted-foreground relative flex items-center justify-between border-t px-4 py-2 text-xs">
         <span className="truncate">
           {session.geoCity && session.geoCountry
-            ? `${session.geoCity}, ${session.geoCountry}`
-            : (session.geoCountry ?? 'Unknown location')}
+            ? `${session.geoCity}, ${getCountryName(session.geoCountry)}`
+            : (getCountryName(session.geoCountry) ?? 'Unknown location')}
         </span>
         <span className="flex-shrink-0">{session.quality ?? 'Unknown quality'}</span>
       </div>

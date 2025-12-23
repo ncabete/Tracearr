@@ -14,6 +14,7 @@ import {
   parseArray,
   parseFirstArrayElement,
 } from '../../../utils/parsing.js';
+import { normalizeStreamDecisions } from '../../../utils/transcodeNormalizer.js';
 import type { MediaSession, MediaUser, MediaLibrary, MediaWatchHistoryItem } from '../types.js';
 
 // ============================================================================
@@ -107,15 +108,14 @@ export function parseSession(item: Record<string, unknown>): MediaSession {
   const videoResolution = parseOptionalString(
     parseFirstArrayElement(item.Media, 'videoResolution')
   );
+  const videoWidth = parseOptionalNumber(parseFirstArrayElement(item.Media, 'width'));
   const videoHeight = parseOptionalNumber(parseFirstArrayElement(item.Media, 'height'));
 
-  // Determine transcode status - check both video and audio decisions
-  const videoDecision = parseString(transcodeSession?.videoDecision, 'directplay');
-  const audioDecision = parseString(transcodeSession?.audioDecision, 'directplay');
-  // isTranscode = true if either video or audio is being transcoded (not just copied/remuxed)
-  const isTranscode =
-    (videoDecision !== 'directplay' && videoDecision !== 'copy') ||
-    (audioDecision !== 'directplay' && audioDecision !== 'copy');
+  // Get stream decisions using the transcode normalizer
+  const { videoDecision, audioDecision, isTranscode } = normalizeStreamDecisions(
+    transcodeSession?.videoDecision as string | null,
+    transcodeSession?.audioDecision as string | null
+  );
 
   const session: MediaSession = {
     sessionKey: parseString(item.sessionKey),
@@ -158,6 +158,7 @@ export function parseSession(item: Record<string, unknown>): MediaSession {
       videoDecision,
       audioDecision,
       videoResolution,
+      videoWidth,
       videoHeight,
     },
     // Plex termination API requires Session.id, not sessionKey

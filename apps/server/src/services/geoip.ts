@@ -24,7 +24,7 @@ const NULL_LOCATION: GeoLocation = {
 };
 
 const LOCAL_LOCATION: GeoLocation = {
-  city: 'Local',
+  city: null,
   region: null,
   country: 'Local Network',
   countryCode: null,

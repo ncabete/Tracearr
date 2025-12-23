@@ -7,20 +7,25 @@ export const RULE_DEFAULTS = {
   impossible_travel: {
     maxSpeedKmh: 500,
     ignoreVpnRanges: false,
+    excludePrivateIps: false,
   },
   simultaneous_locations: {
     minDistanceKm: 100,
+    excludePrivateIps: false,
   },
   device_velocity: {
     maxIps: 5,
     windowHours: 24,
+    excludePrivateIps: false,
   },
   concurrent_streams: {
     maxStreams: 3,
+    excludePrivateIps: false,
   },
   geo_restriction: {
     mode: 'blocklist',
     countries: [],
+    excludePrivateIps: false,
   },
 } as const;
 
@@ -57,6 +62,7 @@ export const WS_EVENTS = {
   STATS_UPDATED: 'stats:updated',
   IMPORT_PROGRESS: 'import:progress',
   IMPORT_JELLYSTAT_PROGRESS: 'import:jellystat:progress',
+  MAINTENANCE_PROGRESS: 'maintenance:progress',
   SUBSCRIBE_SESSIONS: 'subscribe:sessions',
   UNSUBSCRIBE_SESSIONS: 'unsubscribe:sessions',
   VERSION_UPDATE: 'version:update',
@@ -128,7 +134,7 @@ export const JWT_CONFIG = {
 
 // Polling intervals in milliseconds
 export const POLLING_INTERVALS = {
-  SESSIONS: 15000,
+  SESSIONS: 7000,
   STATS_REFRESH: 60000,
   SERVER_HEALTH: 30000,
   // Reconciliation interval when SSE is active (fallback check)

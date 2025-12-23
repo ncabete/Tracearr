@@ -658,8 +658,9 @@ describe('Emby Parser - PlayMethod and Transcode Detection', () => {
     expect(session!.quality.videoDecision).toBe('directplay');
   });
 
-  it('should fall back to TranscodingInfo when PlayMethod not available', () => {
-    const session = parseSession({
+  it('should fall back to TranscodingInfo.IsVideoDirect when PlayMethod not available', () => {
+    // When IsVideoDirect is false, it's transcoding
+    const transcodingSession = parseSession({
       Id: 'session-1',
       NowPlayingItem: { Id: '1', Name: 'Test', Type: 'Movie' },
       PlayState: {
@@ -668,11 +669,31 @@ describe('Emby Parser - PlayMethod and Transcode Detection', () => {
       },
       TranscodingInfo: {
         Bitrate: 5000000,
+        IsVideoDirect: false,
+        IsAudioDirect: false,
       },
     });
 
-    expect(session!.quality.isTranscode).toBe(true);
-    expect(session!.quality.videoDecision).toBe('transcode');
+    expect(transcodingSession!.quality.isTranscode).toBe(true);
+    expect(transcodingSession!.quality.videoDecision).toBe('transcode');
+
+    // When IsVideoDirect is true or not present, default to directplay
+    // TranscodingInfo can exist during DirectStream (remux) mode
+    const directStreamSession = parseSession({
+      Id: 'session-2',
+      NowPlayingItem: { Id: '1', Name: 'Test', Type: 'Movie' },
+      PlayState: {
+        IsPaused: false,
+      },
+      TranscodingInfo: {
+        Bitrate: 5000000,
+        IsVideoDirect: true,
+        IsAudioDirect: true,
+      },
+    });
+
+    expect(directStreamSession!.quality.isTranscode).toBe(false);
+    expect(directStreamSession!.quality.videoDecision).toBe('directplay');
   });
 
   it('should default to directplay when no PlayMethod and no TranscodingInfo', () => {
@@ -721,6 +742,49 @@ describe('Emby Parser - Trailer and Preroll Filtering', () => {
     });
 
     expect(session).toBeNull();
+  });
+
+  it('should filter out theme songs (ExtraType: ThemeSong)', () => {
+    const session = parseSession({
+      Id: 'session-1',
+      NowPlayingItem: {
+        Id: 'theme-1',
+        Name: 'Show Theme Song',
+        Type: 'Audio',
+        ExtraType: 'ThemeSong',
+      },
+    });
+
+    expect(session).toBeNull();
+  });
+
+  it('should filter out theme videos (ExtraType: ThemeVideo)', () => {
+    const session = parseSession({
+      Id: 'session-1',
+      NowPlayingItem: {
+        Id: 'theme-video-1',
+        Name: 'Show Theme Video',
+        Type: 'Video',
+        ExtraType: 'ThemeVideo',
+      },
+    });
+
+    expect(session).toBeNull();
+  });
+
+  it('should NOT filter regular music tracks (no ExtraType)', () => {
+    const session = parseSession({
+      Id: 'session-1',
+      NowPlayingItem: {
+        Id: 'track-1',
+        Name: 'Regular Song',
+        Type: 'Audio',
+        // No ExtraType - regular music library track
+      },
+    });
+
+    expect(session).not.toBeNull();
+    expect(session!.media.title).toBe('Regular Song');
   });
 
   it('should NOT filter regular movies', () => {

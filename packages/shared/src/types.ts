@@ -212,19 +212,27 @@ export type RuleType =
 export interface ImpossibleTravelParams {
   maxSpeedKmh: number;
   ignoreVpnRanges?: boolean;
+  /** When true, exclude sessions from private/local network IPs from comparison */
+  excludePrivateIps?: boolean;
 }
 
 export interface SimultaneousLocationsParams {
   minDistanceKm: number;
+  /** When true, exclude sessions from private/local network IPs from comparison */
+  excludePrivateIps?: boolean;
 }
 
 export interface DeviceVelocityParams {
   maxIps: number;
   windowHours: number;
+  /** When true, exclude private/local network IPs (192.168.x.x, 10.x.x.x, etc.) from unique IP count */
+  excludePrivateIps?: boolean;
 }
 
 export interface ConcurrentStreamsParams {
   maxStreams: number;
+  /** When true, exclude sessions from private/local network IPs from stream count */
+  excludePrivateIps?: boolean;
 }
 
 export type GeoRestrictionMode = 'blocklist' | 'allowlist';
@@ -232,6 +240,8 @@ export type GeoRestrictionMode = 'blocklist' | 'allowlist';
 export interface GeoRestrictionParams {
   mode: GeoRestrictionMode;
   countries: string[];
+  /** When true, always allow sessions from private/local network IPs (default behavior, explicit option) */
+  excludePrivateIps?: boolean;
 }
 
 export type RuleParams =
@@ -560,6 +570,7 @@ export interface ServerToClientEvents {
   'stats:updated': (stats: DashboardStats) => void;
   'import:progress': (progress: TautulliImportProgress) => void;
   'import:jellystat:progress': (progress: JellystatImportProgress) => void;
+  'maintenance:progress': (progress: MaintenanceJobProgress) => void;
   'version:update': (data: { current: string; latest: string; releaseUrl: string }) => void;
   'server:down': (data: { serverId: string; serverName: string }) => void;
   'server:up': (data: { serverId: string; serverName: string }) => void;
@@ -1016,6 +1027,38 @@ export interface PlexDiscoveredServer {
 export interface PlexAvailableServersResponse {
   servers: PlexDiscoveredServer[];
   hasPlexToken: boolean; // False if user has no Plex servers connected
+}
+
+// =============================================================================
+// Maintenance Job Types
+// =============================================================================
+
+export type MaintenanceJobType = 'normalize_players' | 'normalize_countries' | 'fix_imported_progress';
+
+export type MaintenanceJobStatus = 'idle' | 'running' | 'complete' | 'error';
+
+export interface MaintenanceJobProgress {
+  type: MaintenanceJobType;
+  status: MaintenanceJobStatus;
+  totalRecords: number;
+  processedRecords: number;
+  updatedRecords: number;
+  skippedRecords: number;
+  errorRecords: number;
+  message: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface MaintenanceJobResult {
+  success: boolean;
+  type: MaintenanceJobType;
+  processed: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  durationMs: number;
+  message: string;
 }
 
 // =============================================================================

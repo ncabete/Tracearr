@@ -27,6 +27,7 @@ import type { PubSubService } from './cache.js';
 import { JellyfinClient } from './mediaServer/jellyfin/client.js';
 import { EmbyClient } from './mediaServer/emby/client.js';
 import { normalizeClient } from '../utils/platformNormalizer.js';
+import { parseJellystatPlayMethod } from '../utils/transcodeNormalizer.js';
 import {
   createUserMapping,
   createSkippedUserTracker,
@@ -42,51 +43,7 @@ const PROGRESS_THROTTLE_MS = 2000;
 const PROGRESS_RECORD_INTERVAL = 500;
 const TICKS_TO_MS = 10000; // 100ns ticks to ms
 
-/**
- * Parse Jellystat PlayMethod string into video/audio decisions
- *
- * Formats:
- * - "DirectPlay" → both directplay
- * - "DirectStream" → both copy (container remux)
- * - "Transcode" → both transcode
- * - "Transcode (v:direct a:aac)" → video copy, audio transcode
- * - "Transcode (v:h264 a:direct)" → video transcode, audio copy
- */
-function parsePlayMethod(playMethod: string | null | undefined): {
-  videoDecision: 'directplay' | 'copy' | 'transcode';
-  audioDecision: 'directplay' | 'copy' | 'transcode';
-  isTranscode: boolean;
-} {
-  if (!playMethod) {
-    return { videoDecision: 'directplay', audioDecision: 'directplay', isTranscode: false };
-  }
-
-  if (playMethod === 'DirectPlay') {
-    return { videoDecision: 'directplay', audioDecision: 'directplay', isTranscode: false };
-  }
-
-  if (playMethod === 'DirectStream') {
-    return { videoDecision: 'copy', audioDecision: 'copy', isTranscode: false };
-  }
-
-  // Handle "Transcode" or "Transcode (v:xxx a:yyy)"
-  if (playMethod.startsWith('Transcode')) {
-    const match = playMethod.match(/\(v:(\w+)\s+a:(\w+)\)/);
-    if (match) {
-      const [, video, audio] = match;
-      return {
-        videoDecision: video === 'direct' ? 'copy' : 'transcode',
-        audioDecision: audio === 'direct' ? 'copy' : 'transcode',
-        isTranscode: true,
-      };
-    }
-    // Plain "Transcode" without codec info
-    return { videoDecision: 'transcode', audioDecision: 'transcode', isTranscode: true };
-  }
-
-  // Unknown format, assume direct play
-  return { videoDecision: 'directplay', audioDecision: 'directplay', isTranscode: false };
-}
+// parsePlayMethod moved to utils/transcodeNormalizer.ts as parseJellystatPlayMethod
 
 /**
  * Media enrichment data from Jellyfin/Emby API
@@ -166,7 +123,9 @@ export function transformActivityToSession(
       : null;
 
   const mediaType: 'movie' | 'episode' | 'track' = activity.SeriesName ? 'episode' : 'movie';
-  const { videoDecision, audioDecision, isTranscode } = parsePlayMethod(activity.PlayMethod);
+  const { videoDecision, audioDecision, isTranscode } = parseJellystatPlayMethod(
+    activity.PlayMethod
+  );
   const bitrate = activity.TranscodingInfo?.Bitrate
     ? Math.floor(activity.TranscodingInfo.Bitrate / 1000)
     : null;
@@ -201,7 +160,7 @@ export function transformActivityToSession(
     ipAddress: activity.RemoteEndPoint ?? '0.0.0.0',
     geoCity: geo.city,
     geoRegion: geo.region,
-    geoCountry: geo.country,
+    geoCountry: geo.countryCode ?? geo.country,
     geoLat: geo.lat,
     geoLon: geo.lon,
     // Normalize client info for consistency with live sessions

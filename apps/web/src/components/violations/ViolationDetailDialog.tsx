@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { SeverityBadge } from '@/components/violations/SeverityBadge';
 import { getAvatarUrl } from '@/components/users/utils';
+import { getCountryName } from '@/lib/utils';
 import { getViolationDescription, getViolationDetails } from '@/utils/violationDescription';
 import { useSettings } from '@/hooks/queries';
 import type { ViolationWithDetails } from '@tracearr/shared';
@@ -342,7 +343,7 @@ export function ViolationDetailDialog({
                               <p className="font-medium">
                                 {session.geoCity && `${session.geoCity}, `}
                                 {session.geoRegion && `${session.geoRegion}, `}
-                                {session.geoCountry || 'Unknown'}
+                                {getCountryName(session.geoCountry) || 'Unknown'}
                               </p>
                               {isNewLocation && (
                                 <p className="mt-0.5 text-[10px] text-red-600">
@@ -424,7 +425,7 @@ export function ViolationDetailDialog({
                         <p className="text-sm font-medium">
                           {violation.session.geoCity && `${violation.session.geoCity}, `}
                           {violation.session.geoRegion && `${violation.session.geoRegion}, `}
-                          {violation.session.geoCountry || 'Unknown'}
+                          {getCountryName(violation.session.geoCountry) || 'Unknown'}
                         </p>
                       </div>
                     )}

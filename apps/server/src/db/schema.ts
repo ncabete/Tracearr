@@ -286,6 +286,11 @@ export const violations = pgTable(
     severity: varchar('severity', { length: 20 })
       .notNull()
       .$type<(typeof violationSeverityEnum)[number]>(),
+    // Denormalized rule type for unique constraint (rules.type copied here)
+    // This enables the partial unique index without requiring a join
+    ruleType: varchar('rule_type', { length: 50 })
+      .notNull()
+      .$type<(typeof ruleTypeEnum)[number]>(),
     data: jsonb('data').notNull().$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
@@ -294,6 +299,14 @@ export const violations = pgTable(
     index('violations_server_user_id_idx').on(table.serverUserId),
     index('violations_rule_id_idx').on(table.ruleId),
     index('violations_created_at_idx').on(table.createdAt),
+    // Composite index for deduplication queries:
+    // SELECT ... WHERE serverUserId = ? AND acknowledgedAt IS NULL AND createdAt >= ?
+    index('violations_dedup_idx').on(table.serverUserId, table.acknowledgedAt, table.createdAt),
+    // Partial unique index to prevent duplicate unacknowledged violations
+    // Defense-in-depth: catches race conditions that bypass application-level dedup
+    uniqueIndex('violations_unique_active_user_session_type')
+      .on(table.serverUserId, table.sessionId, table.ruleType)
+      .where(sql`${table.acknowledgedAt} IS NULL`),
   ]
 );
 

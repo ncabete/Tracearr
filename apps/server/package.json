@@ -45,6 +45,7 @@
     "@tracearr/shared": "workspace:*",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.65.1",
+    "country-list": "^2.4.1",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.44.0",
     "eventsource": "^4.1.0",
@@ -63,6 +64,7 @@
   "devDependencies": {
     "@tracearr/test-utils": "workspace:*",
     "@types/bcrypt": "^5.0.2",
+    "@types/country-list": "^2.1.4",
     "@types/eventsource": "^3.0.0",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/pg": "^8.11.10",

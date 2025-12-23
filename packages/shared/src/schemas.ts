@@ -12,6 +12,11 @@ export const paginationSchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 });
 
+// Parses boolean query params - z.coerce.boolean() treats "false" as truthy
+export const booleanStringSchema = z
+  .union([z.boolean(), z.string()])
+  .transform((val) => (typeof val === 'boolean' ? val : val === 'true'));
+
 // Auth schemas
 export const loginSchema = z.object({
   serverType: z.enum(['plex', 'jellyfin', 'emby']),
@@ -110,8 +115,8 @@ export const historyQuerySchema = z.object({
   transcodeDecisions: commaSeparatedArray(z.enum(['directplay', 'copy', 'transcode'])),
 
   // Status filters
-  watched: z.coerce.boolean().optional(), // 85%+ completion
-  excludeShortSessions: z.coerce.boolean().optional(), // Exclude <120s sessions
+  watched: booleanStringSchema.optional(), // 85%+ completion
+  excludeShortSessions: booleanStringSchema.optional(), // Exclude <120s sessions
 
   // Sorting
   orderBy: z.enum(['startedAt', 'durationMs', 'mediaTitle']).default('startedAt'),
@@ -190,7 +195,7 @@ export const violationQuerySchema = paginationSchema.extend({
   serverUserId: uuidSchema.optional(),
   ruleId: uuidSchema.optional(),
   severity: z.enum(['low', 'warning', 'high']).optional(),
-  acknowledged: z.coerce.boolean().optional(),
+  acknowledged: booleanStringSchema.optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
 });

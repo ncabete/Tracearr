@@ -23,6 +23,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Plus, Pencil, Trash2, Shield, MapPin, Zap, Users, Globe } from 'lucide-react';
+import { CountryMultiSelect } from '@/components/ui/country-multi-select';
+import { getCountryName } from '@/lib/utils';
 import type { Rule, RuleType, RuleParams, UnitSystem } from '@tracearr/shared';
 import {
   getSpeedUnit,
@@ -74,11 +76,11 @@ const RULE_TYPES: { value: RuleType; label: string; icon: React.ReactNode; descr
   ];
 
 const DEFAULT_PARAMS: Record<RuleType, RuleParams> = {
-  impossible_travel: { maxSpeedKmh: 500 },
-  simultaneous_locations: { minDistanceKm: 100 },
-  device_velocity: { maxIps: 5, windowHours: 24 },
-  concurrent_streams: { maxStreams: 3 },
-  geo_restriction: { mode: 'blocklist', countries: [] },
+  impossible_travel: { maxSpeedKmh: 500, excludePrivateIps: false },
+  simultaneous_locations: { minDistanceKm: 100, excludePrivateIps: false },
+  device_velocity: { maxIps: 5, windowHours: 24, excludePrivateIps: false },
+  concurrent_streams: { maxStreams: 3, excludePrivateIps: false },
+  geo_restriction: { mode: 'blocklist', countries: [], excludePrivateIps: false },
 };
 
 interface RuleFormData {
@@ -88,7 +90,7 @@ interface RuleFormData {
   isActive: boolean;
 }
 
-// Separate component for geo restriction to handle local state for comma input
+// Separate component for geo restriction to handle country selection
 function GeoRestrictionInput({
   params,
   onChange,
@@ -99,18 +101,13 @@ function GeoRestrictionInput({
   // Handle backwards compatibility
   const mode = params.mode ?? 'blocklist';
   const countries = params.countries ?? params.blockedCountries ?? [];
-  const [inputValue, setInputValue] = useState(countries.join(', '));
-
-  const parseAndUpdate = (value: string) => {
-    const parsed = value
-      .split(',')
-      .map((c) => c.trim().toUpperCase())
-      .filter(Boolean);
-    onChange({ mode, countries: parsed });
-  };
 
   const handleModeChange = (newMode: 'blocklist' | 'allowlist') => {
     onChange({ mode: newMode, countries });
+  };
+
+  const handleCountriesChange = (newCountries: string[]) => {
+    onChange({ mode, countries: newCountries });
   };
 
   return (
@@ -131,29 +128,43 @@ function GeoRestrictionInput({
         </Select>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="countries">
-          {mode === 'blocklist' ? 'Blocked' : 'Allowed'} Countries (comma-separated)
-        </Label>
-        <Input
-          id="countries"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onBlur={() => {
-            parseAndUpdate(inputValue);
-            // Normalize the display after blur
-            const normalized = inputValue
-              .split(',')
-              .map((c) => c.trim().toUpperCase())
-              .filter(Boolean);
-            setInputValue(normalized.join(', '));
-          }}
-          placeholder={mode === 'blocklist' ? 'CN, RU, ...' : 'US, CA, GB, ...'}
+        <Label>{mode === 'blocklist' ? 'Blocked' : 'Allowed'} Countries</Label>
+        <CountryMultiSelect
+          value={countries}
+          onChange={handleCountriesChange}
+          placeholder={mode === 'blocklist' ? 'Select countries to block...' : 'Select allowed countries...'}
         />
         <p className="text-muted-foreground text-xs">
-          ISO 3166-1 alpha-2 country codes separated by commas.
-          {mode === 'allowlist' && ' Streams from any other country will trigger a violation.'}
+          {mode === 'allowlist' && 'Streams from any other country will trigger a violation.'}
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Shared toggle for excluding local/private network IPs from rule evaluation */
+function ExcludePrivateIpsToggle({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border p-3">
+      <div className="space-y-0.5">
+        <Label htmlFor="excludePrivateIps" className="text-sm font-medium">
+          Exclude Local Network
+        </Label>
+        <p className="text-muted-foreground text-xs">
+          Ignore sessions from local/private IPs (e.g., 192.168.x.x, 10.x.x.x)
+        </p>
+      </div>
+      <Switch
+        id="excludePrivateIps"
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+      />
     </div>
   );
 }
@@ -171,6 +182,7 @@ function RuleParamsForm({
 }) {
   const speedUnit = getSpeedUnit(unitSystem);
   const distanceUnit = getDistanceUnit(unitSystem);
+  const excludePrivateIps = (params as { excludePrivateIps?: boolean }).excludePrivateIps ?? false;
 
   switch (type) {
     case 'impossible_travel': {
@@ -180,22 +192,28 @@ function RuleParamsForm({
       );
       const defaultDisplay = Math.round(fromMetricDistance(500, unitSystem));
       return (
-        <div className="space-y-2">
-          <Label htmlFor="maxSpeedKmh">Max Speed ({speedUnit})</Label>
-          <Input
-            id="maxSpeedKmh"
-            type="number"
-            value={displayValue}
-            onChange={(e) => {
-              // Convert display value back to metric for storage
-              const inputValue = parseInt(e.target.value) || 0;
-              const metricValue = Math.round(toMetricDistance(inputValue, unitSystem));
-              onChange({ ...params, maxSpeedKmh: metricValue });
-            }}
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="maxSpeedKmh">Max Speed ({speedUnit})</Label>
+            <Input
+              id="maxSpeedKmh"
+              type="number"
+              value={displayValue}
+              onChange={(e) => {
+                // Convert display value back to metric for storage
+                const inputValue = parseInt(e.target.value) || 0;
+                const metricValue = Math.round(toMetricDistance(inputValue, unitSystem));
+                onChange({ ...params, maxSpeedKmh: metricValue });
+              }}
+            />
+            <p className="text-muted-foreground text-xs">
+              Maximum realistic travel speed. Default: {defaultDisplay} {speedUnit} (airplane speed)
+            </p>
+          </div>
+          <ExcludePrivateIpsToggle
+            checked={excludePrivateIps}
+            onCheckedChange={(checked) => onChange({ ...params, excludePrivateIps: checked })}
           />
-          <p className="text-muted-foreground text-xs">
-            Maximum realistic travel speed. Default: {defaultDisplay} {speedUnit} (airplane speed)
-          </p>
         </div>
       );
     }
@@ -206,22 +224,28 @@ function RuleParamsForm({
       );
       const defaultDisplay = Math.round(fromMetricDistance(100, unitSystem));
       return (
-        <div className="space-y-2">
-          <Label htmlFor="minDistanceKm">Min Distance ({distanceUnit})</Label>
-          <Input
-            id="minDistanceKm"
-            type="number"
-            value={displayValue}
-            onChange={(e) => {
-              // Convert display value back to metric for storage
-              const inputValue = parseInt(e.target.value) || 0;
-              const metricValue = Math.round(toMetricDistance(inputValue, unitSystem));
-              onChange({ ...params, minDistanceKm: metricValue });
-            }}
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="minDistanceKm">Min Distance ({distanceUnit})</Label>
+            <Input
+              id="minDistanceKm"
+              type="number"
+              value={displayValue}
+              onChange={(e) => {
+                // Convert display value back to metric for storage
+                const inputValue = parseInt(e.target.value) || 0;
+                const metricValue = Math.round(toMetricDistance(inputValue, unitSystem));
+                onChange({ ...params, minDistanceKm: metricValue });
+              }}
+            />
+            <p className="text-muted-foreground text-xs">
+              Minimum distance between locations to trigger. Default: {defaultDisplay} {distanceUnit}
+            </p>
+          </div>
+          <ExcludePrivateIpsToggle
+            checked={excludePrivateIps}
+            onCheckedChange={(checked) => onChange({ ...params, excludePrivateIps: checked })}
           />
-          <p className="text-muted-foreground text-xs">
-            Minimum distance between locations to trigger. Default: {defaultDisplay} {distanceUnit}
-          </p>
         </div>
       );
     }
@@ -253,23 +277,33 @@ function RuleParamsForm({
           <p className="text-muted-foreground text-xs">
             Maximum unique IPs allowed within the time window. Default: 5 IPs in 24 hours
           </p>
+          <ExcludePrivateIpsToggle
+            checked={excludePrivateIps}
+            onCheckedChange={(checked) => onChange({ ...params, excludePrivateIps: checked })}
+          />
         </div>
       );
     case 'concurrent_streams':
       return (
-        <div className="space-y-2">
-          <Label htmlFor="maxStreams">Max Streams</Label>
-          <Input
-            id="maxStreams"
-            type="number"
-            value={(params as { maxStreams: number }).maxStreams}
-            onChange={(e) => {
-              onChange({ ...params, maxStreams: parseInt(e.target.value) || 0 });
-            }}
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="maxStreams">Max Streams</Label>
+            <Input
+              id="maxStreams"
+              type="number"
+              value={(params as { maxStreams: number }).maxStreams}
+              onChange={(e) => {
+                onChange({ ...params, maxStreams: parseInt(e.target.value) || 0 });
+              }}
+            />
+            <p className="text-muted-foreground text-xs">
+              Maximum simultaneous streams per user. Default: 3
+            </p>
+          </div>
+          <ExcludePrivateIpsToggle
+            checked={excludePrivateIps}
+            onCheckedChange={(checked) => onChange({ ...params, excludePrivateIps: checked })}
           />
-          <p className="text-muted-foreground text-xs">
-            Maximum simultaneous streams per user. Default: 3
-          </p>
         </div>
       );
     case 'geo_restriction':
@@ -477,10 +511,11 @@ function RuleCard({
                     };
                     const mode = p.mode ?? 'blocklist';
                     const countries = p.countries ?? p.blockedCountries ?? [];
+                    const countryNames = countries.map((c) => getCountryName(c) ?? c);
                     return (
                       <span>
                         {mode === 'allowlist' ? 'Allowed' : 'Blocked'}:{' '}
-                        {countries.join(', ') || 'None'}
+                        {countryNames.join(', ') || 'None'}
                       </span>
                     );
                   })()}

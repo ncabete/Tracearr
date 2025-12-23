@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { Play, Clock, AlertTriangle, Tv, MapPin, Calendar, Users } from 'lucide-react';
-import { MediaServerIcon } from '@/components/icons/MediaServerIcon';
+import { Play, Clock, AlertTriangle, Tv, MapPin, Calendar, Users, Activity } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
+import { StatCard } from '@/components/ui/stat-card';
 import { NowPlayingCard } from '@/components/sessions';
 import { StreamCard } from '@/components/map';
 import { SessionDetailSheet } from '@/components/history/SessionDetailSheet';
@@ -42,76 +41,38 @@ export function Dashboard() {
           <Calendar className="text-primary h-5 w-5" />
           <h2 className="text-lg font-semibold">Today</h2>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Alerts */}
-          <Card>
-            <CardContent className="flex items-center justify-between py-4">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Alerts</p>
-                {statsLoading ? (
-                  <Skeleton className="mt-1 h-7 w-12" />
-                ) : (
-                  <div className="text-2xl font-bold">{stats?.alertsLast24h ?? 0}</div>
-                )}
-              </div>
-              <AlertTriangle className="text-muted-foreground h-5 w-5" />
-            </CardContent>
-          </Card>
-
-          {/* Plays */}
-          <Card>
-            <CardContent className="flex items-center justify-between py-4">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Plays</p>
-                {statsLoading ? (
-                  <Skeleton className="mt-1 h-7 w-12" />
-                ) : (
-                  <div className="text-2xl font-bold">{stats?.todayPlays ?? 0}</div>
-                )}
-              </div>
-              <Play className="text-muted-foreground h-5 w-5" />
-            </CardContent>
-          </Card>
-
-          {/* Watch Time */}
-          <Card>
-            <CardContent className="flex items-center justify-between py-4">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Watch Time</p>
-                {statsLoading ? (
-                  <Skeleton className="mt-1 h-7 w-12" />
-                ) : (
-                  <div className="text-2xl font-bold">
-                    {stats?.watchTimeHours ?? 0}
-                    <span className="text-muted-foreground text-lg font-normal">h</span>
-                  </div>
-                )}
-              </div>
-              <Clock className="text-muted-foreground h-5 w-5" />
-            </CardContent>
-          </Card>
-
-          {/* Active Users */}
-          <Card>
-            <CardContent className="flex items-center justify-between py-4">
-              <div>
-                <p className="text-muted-foreground text-sm font-medium">Active Users</p>
-                {statsLoading ? (
-                  <Skeleton className="mt-1 h-7 w-12" />
-                ) : (
-                  <div className="text-2xl font-bold">{stats?.activeUsersToday ?? 0}</div>
-                )}
-              </div>
-              <Users className="text-muted-foreground h-5 w-5" />
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard
+            icon={AlertTriangle}
+            label="Alerts"
+            value={stats?.alertsLast24h ?? 0}
+            isLoading={statsLoading}
+          />
+          <StatCard
+            icon={Play}
+            label="Plays"
+            value={stats?.todayPlays ?? 0}
+            isLoading={statsLoading}
+          />
+          <StatCard
+            icon={Clock}
+            label="Watch Time"
+            value={`${stats?.watchTimeHours ?? 0}h`}
+            isLoading={statsLoading}
+          />
+          <StatCard
+            icon={Users}
+            label="Active Users"
+            value={stats?.activeUsersToday ?? 0}
+            isLoading={statsLoading}
+          />
         </div>
       </section>
 
       {/* Now Playing Section */}
       <section>
         <div className="mb-4 flex items-center gap-2">
-          <Tv className="text-muted-foreground h-5 w-5" />
+          <Tv className="text-primary h-5 w-5" />
           <h2 className="text-lg font-semibold">Now Playing</h2>
           {hasActiveStreams && (
             <span className="bg-muted text-foreground rounded-full px-2 py-0.5 text-xs font-medium">
@@ -165,7 +126,7 @@ export function Dashboard() {
       {isPlexServer && (
         <section>
           <div className="mb-4 flex items-center gap-2">
-            <MediaServerIcon type="plex" className="h-5 w-5" />
+            <Activity className="text-primary h-5 w-5" />
             <h2 className="text-lg font-semibold">Server Resources</h2>
           </div>
           <ServerResourceCharts

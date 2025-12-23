@@ -68,9 +68,12 @@ RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmo
         timescaledb-toolkit-postgresql-15 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Redis
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    redis-server \
+# Install Redis 8 from official Redis repository
+RUN curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-keyring.gpg \
+    && chmod 644 /usr/share/keyrings/redis-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/redis-keyring.gpg] https://packages.redis.io/deb bookworm main" > /etc/apt/sources.list.d/redis.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends redis-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Note: PostgreSQL config is applied during initdb in entrypoint-supervised.sh

@@ -704,6 +704,49 @@ describe('Jellyfin Parser - Trailer and Preroll Filtering', () => {
     expect(session).toBeNull();
   });
 
+  it('should filter out theme songs (ExtraType: ThemeSong)', () => {
+    const session = parseSession({
+      Id: 'session-1',
+      NowPlayingItem: {
+        Id: 'theme-1',
+        Name: 'Show Theme Song',
+        Type: 'Audio',
+        ExtraType: 'ThemeSong',
+      },
+    });
+
+    expect(session).toBeNull();
+  });
+
+  it('should filter out theme videos (ExtraType: ThemeVideo)', () => {
+    const session = parseSession({
+      Id: 'session-1',
+      NowPlayingItem: {
+        Id: 'theme-video-1',
+        Name: 'Show Theme Video',
+        Type: 'Video',
+        ExtraType: 'ThemeVideo',
+      },
+    });
+
+    expect(session).toBeNull();
+  });
+
+  it('should NOT filter regular music tracks (no ExtraType)', () => {
+    const session = parseSession({
+      Id: 'session-1',
+      NowPlayingItem: {
+        Id: 'track-1',
+        Name: 'Regular Song',
+        Type: 'Audio',
+        // No ExtraType - regular music library track
+      },
+    });
+
+    expect(session).not.toBeNull();
+    expect(session!.media.title).toBe('Regular Song');
+  });
+
   it('should NOT filter regular movies', () => {
     const session = parseSession({
       Id: 'session-1',

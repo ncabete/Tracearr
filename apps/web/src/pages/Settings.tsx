@@ -58,6 +58,7 @@ import { toast } from 'sonner';
 import { PlexServerSelector } from '@/components/auth/PlexServerSelector';
 import { NotificationRoutingMatrix } from '@/components/settings/NotificationRoutingMatrix';
 import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
+import { JobsSettings } from '@/components/settings/JobsSettings';
 import { ImportProgressCard, FileDropzone, type ImportProgressData } from '@/components/import';
 import type {
   Server,
@@ -91,6 +92,7 @@ function SettingsNav() {
     { href: '/settings/access', label: 'Access Control' },
     { href: '/settings/mobile', label: 'Mobile' },
     { href: '/settings/import', label: 'Import' },
+    { href: '/settings/jobs', label: 'Jobs' },
   ];
 
   return (
@@ -2378,6 +2380,7 @@ export function Settings() {
         <Route path="access" element={<AccessSettings />} />
         <Route path="mobile" element={<MobileSettings />} />
         <Route path="import" element={<ImportSettings />} />
+        <Route path="jobs" element={<JobsSettings />} />
       </Routes>
     </div>
   );
