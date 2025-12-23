@@ -12,7 +12,7 @@ import type { PostgresJsQueryResultHKT } from 'drizzle-orm/postgres-js';
 import type { Rule, ViolationSeverity, ViolationWithDetails, RuleType } from '@tracearr/shared';
 import { WS_EVENTS, TIME_MS } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { servers, serverUsers, sessions, violations, users, rules } from '../../db/schema.js';
+import { servers, serverUsers, sessions, violations, users } from '../../db/schema.js';
 import type * as schema from '../../db/schema.js';
 import type { RuleEvaluationResult } from '../../services/rules.js';
 import type { PubSubService } from '../../services/cache.js';
@@ -51,62 +51,59 @@ export function getTrustScorePenalty(severity: ViolationSeverity): number {
 // Deduplication window - violations within this time window with overlapping sessions are considered duplicates
 const VIOLATION_DEDUP_WINDOW_MS = 5 * TIME_MS.MINUTE;
 
+// Rules that involve multiple sessions (need session overlap deduplication)
+const MULTI_SESSION_RULES: RuleType[] = ['concurrent_streams', 'simultaneous_locations'];
+
+// Rules that are single-session (need same-session deduplication)
+const SINGLE_SESSION_RULES: RuleType[] = ['impossible_travel', 'device_velocity', 'geo_restriction'];
+
+// ============================================================================
+// Shared Deduplication Logic
+// ============================================================================
+
 /**
- * Check if a duplicate violation already exists for the same user/rule type with overlapping sessions.
- *
- * This prevents creating multiple violations when:
- * - Multiple sessions start simultaneously and each sees the others as active
- * - The same violation event is detected by both SSE and poller
- *
- * A violation is considered a duplicate if:
- * - Same serverUserId
- * - Same rule type (not just ruleId - any rule of the same type)
- * - Created within the dedup window
- * - Not yet acknowledged
- * - Any overlap in relatedSessionIds OR the triggering session is in the other's related sessions
- *
- * @param serverUserId - Server user who violated the rule
- * @param ruleType - Type of rule (concurrent_streams, simultaneous_locations, etc.)
- * @param triggeringSessionId - The session that triggered this violation
- * @param relatedSessionIds - Session IDs involved in this violation
- * @returns true if a duplicate violation exists
+ * Violation data returned from dedup queries
  */
-export async function isDuplicateViolation(
-  serverUserId: string,
+interface RecentViolation {
+  id: string;
+  sessionId: string | null;
+  data: unknown;
+}
+
+/**
+ * P1-6: Shared deduplication logic for both transaction and non-transaction contexts.
+ * Extracted to avoid code duplication between isDuplicateViolation and isDuplicateViolationInTransaction.
+ *
+ * @param recentViolations - Recent violations to check against
+ * @param ruleType - Type of rule being evaluated
+ * @param triggeringSessionId - The session triggering the new violation
+ * @param relatedSessionIds - Related session IDs for multi-session rules
+ * @returns true if a duplicate exists
+ */
+function checkDuplicateInViolations(
+  recentViolations: RecentViolation[],
   ruleType: RuleType,
   triggeringSessionId: string,
   relatedSessionIds: string[]
-): Promise<boolean> {
-  // Only deduplicate for rules that involve multiple sessions
-  if (!['concurrent_streams', 'simultaneous_locations'].includes(ruleType)) {
-    return false;
-  }
-
-  const windowStart = new Date(Date.now() - VIOLATION_DEDUP_WINDOW_MS);
-
-  // Find recent unacknowledged violations for same user and rule type
-  const recentViolations = await db
-    .select({
-      id: violations.id,
-      sessionId: violations.sessionId,
-      data: violations.data,
-    })
-    .from(violations)
-    .innerJoin(rules, eq(violations.ruleId, rules.id))
-    .where(
-      and(
-        eq(violations.serverUserId, serverUserId),
-        eq(rules.type, ruleType),
-        isNull(violations.acknowledgedAt),
-        gte(violations.createdAt, windowStart)
-      )
-    );
-
+): boolean {
   if (recentViolations.length === 0) {
     return false;
   }
 
-  // Check for overlap with any recent violation
+  // Single-session rules: duplicate if same triggering session already has a violation
+  if (SINGLE_SESSION_RULES.includes(ruleType)) {
+    for (const existing of recentViolations) {
+      if (existing.sessionId === triggeringSessionId) {
+        console.log(
+          `[Violations] Skipping duplicate ${ruleType}: session ${triggeringSessionId} already has violation ${existing.id}`
+        );
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Multi-session rules: duplicate if any session overlap
   for (const existing of recentViolations) {
     const existingData = existing.data as Record<string, unknown> | null;
     const existingRelatedIds = (existingData?.relatedSessionIds as string[]) || [];
@@ -138,6 +135,120 @@ export async function isDuplicateViolation(
   }
 
   return false;
+}
+
+/**
+ * Check if a duplicate violation already exists for the same user/rule type.
+ *
+ * This prevents creating multiple violations when:
+ * - Multiple sessions start simultaneously and each sees the others as active
+ * - The same violation event is detected by both SSE and poller
+ * - Rapid successive sessions trigger the same rule type
+ *
+ * Deduplication strategy varies by rule type:
+ *
+ * **Multi-session rules** (concurrent_streams, simultaneous_locations):
+ * A violation is considered a duplicate if any overlap in session IDs.
+ *
+ * **Single-session rules** (impossible_travel, device_velocity, geo_restriction):
+ * A violation is considered a duplicate if same triggering session + rule type.
+ *
+ * Common criteria for all rules:
+ * - Same serverUserId
+ * - Same rule type (not just ruleId - any rule of the same type)
+ * - Created within the dedup window (5 minutes)
+ * - Not yet acknowledged
+ *
+ * @param serverUserId - Server user who violated the rule
+ * @param ruleType - Type of rule (concurrent_streams, simultaneous_locations, etc.)
+ * @param triggeringSessionId - The session that triggered this violation
+ * @param relatedSessionIds - Session IDs involved in this violation
+ * @returns true if a duplicate violation exists
+ */
+export async function isDuplicateViolation(
+  serverUserId: string,
+  ruleType: RuleType,
+  triggeringSessionId: string,
+  relatedSessionIds: string[]
+): Promise<boolean> {
+  const windowStart = new Date(Date.now() - VIOLATION_DEDUP_WINDOW_MS);
+
+  // P2-9: Use violations.ruleType directly instead of joining rules table
+  const recentViolations = await db
+    .select({
+      id: violations.id,
+      sessionId: violations.sessionId,
+      data: violations.data,
+    })
+    .from(violations)
+    .where(
+      and(
+        eq(violations.serverUserId, serverUserId),
+        eq(violations.ruleType, ruleType),
+        isNull(violations.acknowledgedAt),
+        gte(violations.createdAt, windowStart)
+      )
+    );
+
+  return checkDuplicateInViolations(recentViolations, ruleType, triggeringSessionId, relatedSessionIds);
+}
+
+/**
+ * Transaction-aware duplicate violation check.
+ * MUST be called within a SERIALIZABLE transaction to prevent race conditions.
+ *
+ * This version uses the transaction context for reads, ensuring that:
+ * - Reads happen within transaction isolation
+ * - SERIALIZABLE isolation prevents phantom reads
+ * - Concurrent transactions will serialize or retry
+ *
+ * For multi-session rules (concurrent_streams, simultaneous_locations), an advisory
+ * lock is taken to prevent the race condition where both transactions read an empty
+ * violations table and insert violations with different sessionIds.
+ *
+ * @param tx - Transaction context (ensures reads happen within transaction isolation)
+ * @param serverUserId - Server user who violated the rule
+ * @param ruleType - Type of rule (concurrent_streams, simultaneous_locations, etc.)
+ * @param triggeringSessionId - The session that triggered this violation
+ * @param relatedSessionIds - Session IDs involved in this violation
+ * @returns true if a duplicate violation exists
+ */
+export async function isDuplicateViolationInTransaction(
+  tx: TransactionContext,
+  serverUserId: string,
+  ruleType: RuleType,
+  triggeringSessionId: string,
+  relatedSessionIds: string[]
+): Promise<boolean> {
+  // P0-1: For multi-session rules, take advisory lock to serialize concurrent transactions
+  // This prevents the race condition where both transactions read empty table and insert
+  // violations with different sessionIds (which bypasses both SERIALIZABLE and unique constraint)
+  if (MULTI_SESSION_RULES.includes(ruleType)) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${serverUserId} || '::' || ${ruleType}))`);
+  }
+
+  const windowStart = new Date(Date.now() - VIOLATION_DEDUP_WINDOW_MS);
+
+  // P2-9: Use violations.ruleType directly instead of joining rules table
+  // The ruleType column was added for deduplication and constraint support
+  const recentViolations = await tx
+    .select({
+      id: violations.id,
+      sessionId: violations.sessionId,
+      data: violations.data,
+    })
+    .from(violations)
+    .where(
+      and(
+        eq(violations.serverUserId, serverUserId),
+        eq(violations.ruleType, ruleType),
+        isNull(violations.acknowledgedAt),
+        gte(violations.createdAt, windowStart)
+      )
+    );
+
+  // P1-6: Use shared deduplication logic
+  return checkDuplicateInViolations(recentViolations, ruleType, triggeringSessionId, relatedSessionIds);
 }
 
 // ============================================================================
@@ -211,25 +322,33 @@ export async function createViolation(
 
   // Use transaction to ensure violation creation and trust score update are atomic
   const created = await db.transaction(async (tx) => {
-    const [violation] = await tx
+    // Use onConflictDoNothing to handle race conditions at DB level
+    // If the unique constraint is violated, the insert is silently skipped
+    const insertedRows = await tx
       .insert(violations)
       .values({
         ruleId,
         serverUserId,
         sessionId,
         severity: result.severity,
+        ruleType: rule.type,
         data: result.data,
       })
+      .onConflictDoNothing()
       .returning();
 
-    // Decrease server user trust score based on severity (atomic within transaction)
-    await tx
-      .update(serverUsers)
-      .set({
-        trustScore: sql`GREATEST(0, ${serverUsers.trustScore} - ${trustPenalty})`,
-        updatedAt: new Date(),
-      })
-      .where(eq(serverUsers.id, serverUserId));
+    const violation = insertedRows[0];
+
+    // Only update trust score if we actually inserted a violation
+    if (violation) {
+      await tx
+        .update(serverUsers)
+        .set({
+          trustScore: sql`GREATEST(0, ${serverUsers.trustScore} - ${trustPenalty})`,
+          updatedAt: new Date(),
+        })
+        .where(eq(serverUsers.id, serverUserId));
+    }
 
     return violation;
   });
@@ -330,19 +449,33 @@ export async function createViolationInTransaction(
   sessionId: string,
   result: RuleEvaluationResult,
   rule: Rule
-): Promise<ViolationInsertResult> {
+): Promise<ViolationInsertResult | null> {
   const trustPenalty = getTrustScorePenalty(result.severity);
 
-  const [violation] = await tx
+  // Use onConflictDoNothing to handle race conditions at DB level
+  // If the unique constraint is violated, the insert is silently skipped
+  const insertedRows = await tx
     .insert(violations)
     .values({
       ruleId,
       serverUserId,
       sessionId,
       severity: result.severity,
+      ruleType: rule.type,
       data: result.data,
     })
+    .onConflictDoNothing()
     .returning();
+
+  const violation = insertedRows[0];
+
+  // If insert was skipped due to conflict, return null
+  if (!violation) {
+    console.log(
+      `[Violations] Duplicate prevented by DB constraint: ${rule.type} for session ${sessionId}`
+    );
+    return null;
+  }
 
   // Decrease server user trust score based on severity
   await tx
@@ -353,7 +486,7 @@ export async function createViolationInTransaction(
     })
     .where(eq(serverUsers.id, serverUserId));
 
-  return { violation: violation!, rule, trustPenalty };
+  return { violation, rule, trustPenalty };
 }
 
 /**
