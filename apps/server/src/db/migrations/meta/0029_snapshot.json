@@ -1,6 +1,6 @@
 {
-  "id": "68d0b657-dfac-4fcc-91d2-9c2092f1e43e",
-  "prevId": "7fb4a7dd-37b1-4cfe-903b-2990de292a26",
+  "id": "5f4bb0a2-0f8b-46bc-9e1b-f8f532ace942",
+  "prevId": "73fb6f8a-645d-4c53-9e47-2c024d6fbfa4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -883,9 +883,31 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "plex_account_id": {
+          "name": "plex_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "servers_plex_account_idx": {
+          "name": "servers_plex_account_idx",
+          "columns": [
+            {
+              "expression": "plex_account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -2234,6 +2256,134 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.plex_accounts": {
+      "name": "plex_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plex_account_id": {
+          "name": "plex_account_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plex_username": {
+          "name": "plex_username",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plex_email": {
+          "name": "plex_email",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plex_thumbnail": {
+          "name": "plex_thumbnail",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plex_token": {
+          "name": "plex_token",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allow_login": {
+          "name": "allow_login",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "plex_accounts_user_idx": {
+          "name": "plex_accounts_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "plex_accounts_allow_login_idx": {
+          "name": "plex_accounts_allow_login_idx",
+          "columns": [
+            {
+              "expression": "plex_account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "allow_login",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "plex_accounts_user_id_users_id_fk": {
+          "name": "plex_accounts_user_id_users_id_fk",
+          "tableFrom": "plex_accounts",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "plex_accounts_plex_account_id_unique": {
+          "name": "plex_accounts_plex_account_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["plex_account_id"]
+        },
+        "plex_accounts_user_plex_unique": {
+          "name": "plex_accounts_user_plex_unique",
+          "nullsNotDistinct": false,
+          "columns": ["user_id", "plex_account_id"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

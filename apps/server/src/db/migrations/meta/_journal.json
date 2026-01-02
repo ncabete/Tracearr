@@ -204,6 +204,13 @@
       "when": 1766855040000,
       "tag": "0028_plex_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1767225600000,
+      "tag": "0029_engagement_tracking",
+      "breakpoints": true
     }
   ]
 }
