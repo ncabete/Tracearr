@@ -117,8 +117,8 @@ export const playsRoutes: FastifyPluginAsync = async (app) => {
         ${baseWhere}
         ${endDateWhere}
         ${serverFilter}
-        GROUP BY (started_at AT TIME ZONE ${tz})::date
-        ORDER BY (started_at AT TIME ZONE ${tz})::date
+        GROUP BY 1
+        ORDER BY 1
       `);
 
     return { data: result.rows as { date: string; count: number }[] };
