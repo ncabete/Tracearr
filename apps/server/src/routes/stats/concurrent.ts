@@ -5,11 +5,11 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { sql, gte } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { statsQuerySchema } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import { sessions } from '../../db/schema.js';
-import { resolveDateRange, hasAggregates } from './utils.js';
+import { resolveDateRange } from './utils.js';
+import { MEDIA_TYPE_SQL_FILTER } from '../../constants/index.js';
 
 export const concurrentRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -24,52 +24,30 @@ export const concurrentRoutes: FastifyPluginAsync = async (app) => {
     const { period, startDate, endDate } = query.data;
     const dateRange = resolveDateRange(period, startDate, endDate);
 
-    let hourlyData: { hour: string; maxConcurrent: number }[];
+    const baseWhere = dateRange.start
+      ? sql`WHERE started_at >= ${dateRange.start} ${MEDIA_TYPE_SQL_FILTER}`
+      : sql`WHERE true ${MEDIA_TYPE_SQL_FILTER}`;
 
-    if (await hasAggregates()) {
-      // Use continuous aggregate - sums across servers
-      const baseWhere = dateRange.start ? sql`WHERE hour >= ${dateRange.start}` : sql`WHERE true`;
+    const result = await db.execute(sql`
+      SELECT
+        date_trunc('hour', started_at)::text as hour,
+        COUNT(*)::int as total,
+        COUNT(*) FILTER (WHERE is_transcode = false OR is_transcode IS NULL)::int as direct,
+        COUNT(*) FILTER (WHERE is_transcode = true)::int as transcode
+      FROM sessions
+      ${baseWhere}
+      GROUP BY date_trunc('hour', started_at)
+      ORDER BY date_trunc('hour', started_at)
+    `);
 
-      const result = await db.execute(sql`
-        SELECT
-          hour::text,
-          SUM(stream_count)::int as max_concurrent
-        FROM hourly_concurrent_streams
-        ${baseWhere}
-        GROUP BY hour
-        ORDER BY hour
-      `);
-      hourlyData = (result.rows as { hour: string; max_concurrent: number }[]).map((r) => ({
-        hour: r.hour,
-        maxConcurrent: r.max_concurrent,
-      }));
-    } else {
-      // Fallback to raw sessions query
-      // This is simplified - a production version would use time-range overlaps
-      if (dateRange.start) {
-        const result = await db
-          .select({
-            hour: sql<string>`date_trunc('hour', started_at)::text`,
-            maxConcurrent: sql<number>`count(*)::int`,
-          })
-          .from(sessions)
-          .where(gte(sessions.startedAt, dateRange.start))
-          .groupBy(sql`date_trunc('hour', started_at)`)
-          .orderBy(sql`date_trunc('hour', started_at)`);
-        hourlyData = result;
-      } else {
-        // All-time query
-        const result = await db
-          .select({
-            hour: sql<string>`date_trunc('hour', started_at)::text`,
-            maxConcurrent: sql<number>`count(*)::int`,
-          })
-          .from(sessions)
-          .groupBy(sql`date_trunc('hour', started_at)`)
-          .orderBy(sql`date_trunc('hour', started_at)`);
-        hourlyData = result;
-      }
-    }
+    const hourlyData = (
+      result.rows as { hour: string; total: number; direct: number; transcode: number }[]
+    ).map((r) => ({
+      hour: r.hour,
+      total: r.total,
+      direct: r.direct,
+      transcode: r.transcode,
+    }));
 
     return { data: hourlyData };
   });
