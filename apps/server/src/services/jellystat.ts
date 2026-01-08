@@ -65,7 +65,7 @@ interface MediaEnrichment {
  * JellyStat MediaStream from backup (video, audio, or subtitle stream)
  */
 interface JellystatMediaStream {
-  Type?: 'Video' | 'Audio' | 'Subtitle' | string;
+  Type?: string; // 'Video' | 'Audio' | 'Subtitle' etc.
   Codec?: string;
   BitRate?: number;
   Width?: number;
