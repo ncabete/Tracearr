@@ -353,7 +353,7 @@ export function StreamDetailsPanel({
                   showArrow={false}
                 />
               )}
-              {videoTranscodeReasons.length > 0 && (
+              {videoDecision == 'transcode' && videoTranscodeReasons.length > 0 && (
                 <ComparisonRow
                   label="Transcode Reason"
                   sourceValue={videoTranscodeReasons.join(', ')}
@@ -412,7 +412,7 @@ export function StreamDetailsPanel({
                 showArrow={false}
               />
             )}
-            {audioTranscodeReasons.length > 0 && (
+            {audioDecision == 'transcode' && audioTranscodeReasons.length > 0 && (
               <ComparisonRow
                 label="Transcode Reason"
                 sourceValue={audioTranscodeReasons.join(', ')}
