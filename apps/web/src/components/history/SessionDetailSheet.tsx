@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Film,
   Tv,
@@ -35,6 +36,7 @@ import { cn, getCountryName } from '@/lib/utils';
 import { getAvatarUrl } from '@/components/users/utils';
 import { useTheme } from '@/components/theme-provider';
 import { StreamDetailsPanel } from './StreamDetailsPanel';
+
 import type {
   SessionWithDetails,
   ActiveSession,
@@ -93,6 +95,14 @@ function formatDuration(ms: number | null): string {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
+}
+
+// Format transcode reason codes into human-friendly labels
+function formatReason(reason: string): string {
+  return reason
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .trim();
 }
 
 // Get watch time - for active sessions (durationMs is null), calculate from elapsed time
@@ -239,6 +249,9 @@ export function SessionDetailSheet({ session, open, onOpenChange }: Props) {
     getCountryName(session.geoCountry),
   ].filter(Boolean);
   const locationString = locationParts.join(', ');
+  const transcodeReasons = session.transcodeInfo?.reasons ?? [];
+  const hasTranscodeReason = transcodeReasons.length > 0;
+  const transcodeReasonText = transcodeReasons.map(formatReason).join(', ');
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -449,10 +462,26 @@ export function SessionDetailSheet({ session, open, onOpenChange }: Props) {
                 className="gap-1 text-xs"
               >
                 {session.isTranscode ? (
-                  <>
-                    <Repeat2 className="h-3 w-3" />
-                    Transcode
-                  </>
+                  hasTranscodeReason ? (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="flex items-center gap-1">
+                            <Repeat2 className="h-3 w-3" />
+                            Transcode
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs text-left">
+                          <span className="text-[11px]">{transcodeReasonText}</span>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  ) : (
+                    <>
+                      <Repeat2 className="h-3 w-3" />
+                      Transcode
+                    </>
+                  )
                 ) : session.videoDecision === 'copy' || session.audioDecision === 'copy' ? (
                   <>
                     <MonitorPlay className="h-3 w-3" />

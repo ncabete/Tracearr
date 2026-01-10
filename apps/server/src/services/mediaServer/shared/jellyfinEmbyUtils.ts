@@ -13,6 +13,7 @@ import {
   parseOptionalNumber,
   parseBoundedString,
   parseOptionalBoundedString,
+  parseArray,
   getNestedObject,
   getNestedValue,
 } from '../../../utils/parsing.js';
@@ -586,6 +587,14 @@ function extractTranscodeInfo(
     if (sourceContainer && streamContainer) {
       info.containerDecision =
         sourceContainer.toLowerCase() === streamContainer.toLowerCase() ? 'direct' : 'transcode';
+    }
+
+    // Parse Jellyfin/Emby transcode reasons (if provided)
+    const reasons = parseArray(transcodingInfo.TranscodeReasons, (reason) =>
+      parseString(reason).trim()
+    ).filter((reason) => reason.length > 0);
+    if (reasons.length > 0) {
+      info.reasons = Array.from(new Set(reasons));
     }
 
     // Note: Jellyfin/Emby don't expose these fields:

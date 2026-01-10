@@ -192,6 +192,7 @@ export interface TranscodeInfo {
   hwEncoding?: string;
   speed?: number;
   throttled?: boolean;
+  reasons?: string[];
 }
 
 /** Subtitle stream information */
