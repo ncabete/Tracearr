@@ -70,6 +70,13 @@ function formatChannels(channels: number | null | undefined): string {
   return `${channels}ch`;
 }
 
+function formatFramerate(framerate: string | number | null | undefined): string {
+  if (framerate === null || framerate === undefined || framerate === '') return '—';
+  const numeric = typeof framerate === 'number' ? framerate : parseFloat(String(framerate));
+  if (Number.isNaN(numeric)) return String(framerate);
+  return numeric.toFixed(2);
+}
+
 // Get decision badge variant and label
 function getDecisionBadge(decision: string | null): {
   variant: 'success' | 'warning' | 'secondary';
@@ -116,25 +123,58 @@ function formatCodec(codec: string | null | undefined): string {
   return codec.charAt(0).toUpperCase() + codec.slice(1);
 }
 
+function formatTranscodeReason(reason: string): string {
+  return reason
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .trim();
+}
+
+function filterTranscodeReasons(reasons: string[] | null | undefined, keyword: string): string[] {
+  if (!reasons || reasons.length === 0) return [];
+  const needle = keyword.toLowerCase();
+  return reasons
+    .filter((reason) => reason.toLowerCase().includes(needle))
+    .map(formatTranscodeReason);
+}
+
 // Comparison row component
 function ComparisonRow({
   label,
   sourceValue,
   streamValue,
   showArrow = true,
+  sourceClassName,
+  streamClassName,
+  labelClassName,
+  labelNoTruncate,
 }: {
   label: string;
   sourceValue: string;
   streamValue?: string;
   showArrow?: boolean;
+  sourceClassName?: string;
+  streamClassName?: string;
+  labelClassName?: string;
+  labelNoTruncate?: boolean;
 }) {
   const isDifferent =
     streamValue && sourceValue !== streamValue && sourceValue !== '—' && streamValue !== '—';
+  const sourceClasses = cn(sourceClassName ?? 'truncate font-medium');
+  const streamClasses = cn(
+    streamClassName ?? 'truncate',
+    isDifferent && 'font-medium text-amber-500'
+  );
+  const labelClasses = cn(
+    'text-muted-foreground',
+    labelNoTruncate ? 'break-words whitespace-normal' : 'truncate',
+    labelClassName
+  );
 
   return (
     <div className="grid grid-cols-[100px_1fr_24px_1fr] items-center gap-2 py-1 text-sm">
-      <span className="text-muted-foreground truncate">{label}</span>
-      <span className="truncate font-medium">{sourceValue}</span>
+      <span className={labelClasses}>{label}</span>
+      <span className={sourceClasses}>{sourceValue}</span>
       {showArrow && streamValue !== undefined ? (
         <ArrowRight
           className={cn(
@@ -145,11 +185,7 @@ function ComparisonRow({
       ) : (
         <span />
       )}
-      {streamValue !== undefined ? (
-        <span className={cn('truncate', isDifferent && 'font-medium text-amber-500')}>
-          {streamValue}
-        </span>
-      ) : null}
+      {streamValue !== undefined ? <span className={streamClasses}>{streamValue}</span> : null}
     </div>
   );
 }
@@ -171,6 +207,21 @@ function SectionHeader({
         {title}
       </div>
       {badge}
+    </div>
+  );
+}
+
+function SectionColumnLabels({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        'text-muted-foreground grid grid-cols-[100px_1fr_24px_1fr] items-center gap-2 text-[10px] tracking-[0.3em] uppercase',
+        className
+      )}
+    >
+      <span />
+      <span className="font-medium tracking-wide uppercase">Source</span>
+      <span className="text-right font-medium tracking-wide uppercase">Stream</span>
     </div>
   );
 }
@@ -213,17 +264,12 @@ export function StreamDetailsPanel({
 
   const videoBadge = getDecisionBadge(videoDecision);
   const audioBadge = getDecisionBadge(audioDecision);
+  const transcodeReasons = transcodeInfo?.reasons ?? [];
+  const videoTranscodeReasons = filterTranscodeReasons(transcodeReasons, 'video');
+  const audioTranscodeReasons = filterTranscodeReasons(transcodeReasons, 'audio');
 
   return (
     <div className="space-y-3">
-      {/* Column headers */}
-      <div className="text-muted-foreground grid grid-cols-[100px_1fr_24px_1fr] items-center gap-2 text-xs">
-        <span />
-        <span className="font-medium tracking-wide uppercase">Source</span>
-        <span />
-        <span className="font-medium tracking-wide uppercase">Stream</span>
-      </div>
-
       {/* Container info */}
       {transcodeInfo?.sourceContainer && (
         <>
@@ -241,68 +287,84 @@ export function StreamDetailsPanel({
 
       {/* Video Section */}
       {hasVideoDetails && (
-        <div>
-          <SectionHeader
-            icon={Video}
-            title="Video"
-            badge={
-              <Badge variant={videoBadge.variant} className="text-xs">
-                {videoBadge.label}
-              </Badge>
-            }
-          />
-          <div className="space-y-0.5 rounded-md border p-2">
-            <ComparisonRow
-              label="Codec"
-              sourceValue={formatCodec(sourceVideoCodec)}
-              streamValue={formatCodec(streamVideoCodec ?? sourceVideoCodec)}
+        <>
+          <Separator className="border-border/50" />
+          <div>
+            <SectionHeader
+              icon={Video}
+              title="Video"
+              badge={
+                <Badge variant={videoBadge.variant} className="text-xs">
+                  {videoBadge.label}
+                </Badge>
+              }
             />
-            <ComparisonRow
-              label="Resolution"
-              sourceValue={formatResolution(sourceVideoWidth, sourceVideoHeight)}
-              streamValue={formatResolution(
-                streamVideoDetails?.width ?? sourceVideoWidth,
-                streamVideoDetails?.height ?? sourceVideoHeight
+            <div className="space-y-0.5 rounded-md border p-2">
+              <SectionColumnLabels className="border-border/50 mb-1 border-b pb-1" />
+              <ComparisonRow
+                label="Codec"
+                sourceValue={formatCodec(sourceVideoCodec)}
+                streamValue={formatCodec(streamVideoCodec ?? sourceVideoCodec)}
+              />
+
+              <ComparisonRow
+                label="Resolution"
+                sourceValue={formatResolution(sourceVideoWidth, sourceVideoHeight)}
+                streamValue={formatResolution(
+                  streamVideoDetails?.width ?? sourceVideoWidth,
+                  streamVideoDetails?.height ?? sourceVideoHeight
+                )}
+              />
+              <ComparisonRow
+                label="Bitrate"
+                sourceValue={formatBitrate(sourceVideoDetails?.bitrate)}
+                streamValue={formatBitrate(
+                  streamVideoDetails?.bitrate ?? sourceVideoDetails?.bitrate
+                )}
+              />
+              {/* Extended video details - only show if we have them */}
+              {sourceVideoDetails?.framerate && (
+                <ComparisonRow
+                  label="Framerate"
+                  sourceValue={formatFramerate(sourceVideoDetails.framerate)}
+                  streamValue={formatFramerate(
+                    streamVideoDetails?.framerate ?? sourceVideoDetails.framerate
+                  )}
+                />
               )}
-            />
-            <ComparisonRow
-              label="Bitrate"
-              sourceValue={formatBitrate(sourceVideoDetails?.bitrate)}
-              streamValue={formatBitrate(
-                streamVideoDetails?.bitrate ?? sourceVideoDetails?.bitrate
+              {sourceVideoDetails?.dynamicRange && (
+                <ComparisonRow
+                  label="HDR"
+                  sourceValue={sourceVideoDetails.dynamicRange}
+                  streamValue={streamVideoDetails?.dynamicRange ?? sourceVideoDetails.dynamicRange}
+                />
               )}
-            />
-            {/* Extended video details - only show if we have them */}
-            {sourceVideoDetails?.framerate && (
-              <ComparisonRow
-                label="Framerate"
-                sourceValue={sourceVideoDetails.framerate}
-                streamValue={streamVideoDetails?.framerate ?? sourceVideoDetails.framerate}
-              />
-            )}
-            {sourceVideoDetails?.dynamicRange && (
-              <ComparisonRow
-                label="HDR"
-                sourceValue={sourceVideoDetails.dynamicRange}
-                streamValue={streamVideoDetails?.dynamicRange ?? sourceVideoDetails.dynamicRange}
-              />
-            )}
-            {sourceVideoDetails?.profile && (
-              <ComparisonRow
-                label="Profile"
-                sourceValue={sourceVideoDetails.profile}
-                showArrow={false}
-              />
-            )}
-            {sourceVideoDetails?.colorSpace && (
-              <ComparisonRow
-                label="Color"
-                sourceValue={`${sourceVideoDetails.colorSpace}${sourceVideoDetails.colorDepth ? ` ${sourceVideoDetails.colorDepth}bit` : ''}`}
-                showArrow={false}
-              />
-            )}
+              {sourceVideoDetails?.profile && (
+                <ComparisonRow
+                  label="Profile"
+                  sourceValue={sourceVideoDetails.profile}
+                  showArrow={false}
+                />
+              )}
+              {sourceVideoDetails?.colorSpace && (
+                <ComparisonRow
+                  label="Color"
+                  sourceValue={`${sourceVideoDetails.colorSpace}${sourceVideoDetails.colorDepth ? ` ${sourceVideoDetails.colorDepth}bit` : ''}`}
+                  showArrow={false}
+                />
+              )}
+              {videoTranscodeReasons.length > 0 && (
+                <ComparisonRow
+                  label="Transcode Reason"
+                  sourceValue={videoTranscodeReasons.join(', ')}
+                  showArrow={false}
+                  sourceClassName="break-words"
+                  labelNoTruncate
+                />
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Audio Section */}
@@ -318,6 +380,7 @@ export function StreamDetailsPanel({
             }
           />
           <div className="space-y-0.5 rounded-md border p-2">
+            <SectionColumnLabels className="border-border/50 mb-1 border-b pb-1" />
             <ComparisonRow
               label="Codec"
               sourceValue={formatCodec(sourceAudioCodec)}
@@ -347,6 +410,15 @@ export function StreamDetailsPanel({
                 label="Sample Rate"
                 sourceValue={`${sourceAudioDetails.sampleRate / 1000} kHz`}
                 showArrow={false}
+              />
+            )}
+            {audioTranscodeReasons.length > 0 && (
+              <ComparisonRow
+                label="Transcode Reason"
+                sourceValue={audioTranscodeReasons.join(', ')}
+                showArrow={false}
+                sourceClassName="break-words"
+                labelNoTruncate
               />
             )}
           </div>
