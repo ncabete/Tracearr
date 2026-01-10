@@ -1019,6 +1019,36 @@ export class TautulliService {
       }
     }
 
+    // Update joinedAt for users based on their earliest session
+    // Always update to earliest session date (reflects first activity on this server)
+    progress.message = 'Updating user join dates...';
+    publishProgress(progress);
+    try {
+      const joinDateUpdates = await db.execute(sql`
+        UPDATE server_users su
+        SET joined_at = earliest.min_started
+        FROM (
+          SELECT server_user_id, MIN(started_at) as min_started
+          FROM sessions
+          WHERE server_id = ${serverId}
+          GROUP BY server_user_id
+        ) earliest
+        WHERE su.id = earliest.server_user_id
+          AND su.server_id = ${serverId}
+      `);
+      const updatedCount =
+        typeof joinDateUpdates === 'object' &&
+        joinDateUpdates !== null &&
+        'rowCount' in joinDateUpdates
+          ? (joinDateUpdates.rowCount as number)
+          : 0;
+      if (updatedCount > 0) {
+        console.log(`[Import] Updated join dates for ${updatedCount} users`);
+      }
+    } catch (err) {
+      console.warn('Failed to update user join dates:', err);
+    }
+
     // Build final message with detailed breakdown
     const parts: string[] = [];
     if (imported > 0) parts.push(`${imported} new`);

@@ -54,12 +54,14 @@ const userColumns: ColumnDef<ServerUserWithIdentity>[] = [
     cell: ({ row }) => <TrustScoreBadge score={row.original.trustScore} showLabel />,
   },
   {
-    accessorKey: 'createdAt',
+    accessorKey: 'joinedAt',
     header: 'Joined',
     cell: ({ row }) => (
       <div className="text-muted-foreground flex items-center gap-2 text-sm">
         <Clock className="h-4 w-4" />
-        {formatDistanceToNow(new Date(row.original.createdAt), { addSuffix: true })}
+        {row.original.joinedAt
+          ? formatDistanceToNow(new Date(row.original.joinedAt), { addSuffix: true })
+          : 'Unknown'}
       </div>
     ),
   },
