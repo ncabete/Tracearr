@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/web/public/images/banner.png" alt="Tracearr" width="600" />
+  <img src="apps/web/public/images/og_image.png" alt="Tracearr" width="600" />
 </p>
 
 <p align="center">
