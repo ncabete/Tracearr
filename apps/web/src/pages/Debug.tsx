@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Trash2,
@@ -10,9 +11,11 @@ import {
   Shield,
   RefreshCw,
   Info,
+  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useVersion } from '@/hooks/queries';
 import { tokenStorage } from '@/lib/api';
 import { API_BASE_PATH } from '@tracearr/shared';
 
@@ -43,6 +46,30 @@ interface EnvInfo {
   env: Record<string, string>;
 }
 
+interface LogFileInfo {
+  name: string;
+  exists: boolean;
+}
+
+interface LogListResponse {
+  files: LogFileInfo[];
+}
+
+interface LogEntriesResponse {
+  entries: string[];
+  truncated: boolean;
+  fileExists: boolean;
+}
+
+const MAX_LOG_LIMIT = 1000;
+const LOG_LIMIT_STEP = 200;
+
+const formatLogLabel = (name: string) => name.replace('.log', '').replace(/-/g, ' ');
+
+const NON_SUPERVISED_MESSAGE =
+  "You're running Tracearr in non-supervised mode. Log explorer is not available. " +
+  'Logs can be viewed by inspecting each container directly (for example, docker logs <container_name>).';
+
 // Simple fetch helper for debug endpoints
 async function debugFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = tokenStorage.getAccessToken();
@@ -67,6 +94,8 @@ async function debugFetch<T>(path: string, options: RequestInit = {}): Promise<T
 
 export function Debug() {
   const queryClient = useQueryClient();
+  const version = useVersion();
+  const isSupervised = Boolean(version.data?.current.tag?.toLowerCase().includes('supervised'));
 
   const stats = useQuery({
     queryKey: ['debug', 'stats'],
@@ -77,6 +106,30 @@ export function Debug() {
     queryKey: ['debug', 'env'],
     queryFn: () => debugFetch<EnvInfo>('/env'),
   });
+
+  const [selectedLog, setSelectedLog] = useState<string | null>(null);
+  const [logLimit, setLogLimit] = useState(LOG_LIMIT_STEP);
+
+  const logFiles = useQuery({
+    queryKey: ['debug', 'logs'],
+    queryFn: () => debugFetch<LogListResponse>('/logs'),
+    enabled: isSupervised,
+  });
+
+  const logEntries = useQuery({
+    queryKey: ['debug', 'logs', selectedLog, logLimit],
+    queryFn: () =>
+      debugFetch<LogEntriesResponse>(
+        `/logs/${encodeURIComponent(selectedLog ?? '')}?limit=${logLimit}`
+      ),
+    enabled: isSupervised && Boolean(selectedLog),
+  });
+
+  useEffect(() => {
+    if (!selectedLog && logFiles.data?.files.length) {
+      setSelectedLog(logFiles.data.files[0]?.name ?? null);
+    }
+  }, [selectedLog, logFiles.data?.files]);
 
   const deleteMutation = useMutation({
     mutationFn: async ({ action, isPost }: { action: string; isPost?: boolean }) => {
@@ -106,6 +159,11 @@ export function Debug() {
     if (days > 0) return `${days}d ${hours}h ${mins}m`;
     if (hours > 0) return `${hours}h ${mins}m`;
     return `${mins}m`;
+  };
+
+  const handleLogsRefresh = () => {
+    void logFiles.refetch();
+    void logEntries.refetch();
   };
 
   return (
@@ -236,6 +294,79 @@ export function Debug() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Log Explorer */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Log Explorer
+          </CardTitle>
+          <CardDescription>Supervised deployment logs</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {version.isLoading ? (
+            <div className="text-muted-foreground text-sm">Checking deployment mode...</div>
+          ) : !isSupervised ? (
+            <div className="text-muted-foreground text-sm">{NON_SUPERVISED_MESSAGE}</div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleLogsRefresh}
+                  disabled={logFiles.isFetching || logEntries.isFetching}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Refresh Logs
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setLogLimit((prev) => Math.min(prev + LOG_LIMIT_STEP, MAX_LOG_LIMIT))
+                  }
+                  disabled={logEntries.isFetching || logLimit >= MAX_LOG_LIMIT}
+                >
+                  Load More
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {logFiles.data?.files.map((file) => (
+                  <Button
+                    key={file.name}
+                    size="sm"
+                    variant={selectedLog === file.name ? 'default' : 'outline'}
+                    onClick={() => setSelectedLog(file.name)}
+                  >
+                    {formatLogLabel(file.name)}
+                  </Button>
+                ))}
+              </div>
+
+              {selectedLog && logEntries.isLoading ? (
+                <div className="text-muted-foreground text-sm">Loading log entries...</div>
+              ) : selectedLog && !logEntries.data?.fileExists ? (
+                <div className="text-muted-foreground text-sm">Log file not found.</div>
+              ) : logEntries.data?.entries.length ? (
+                <div className="bg-muted/30 max-h-[420px] overflow-y-auto rounded-md border p-3">
+                  <pre className="font-mono text-xs break-words whitespace-pre-wrap">
+                    {logEntries.data.entries.join('\n')}
+                  </pre>
+                </div>
+              ) : (
+                <div className="text-muted-foreground text-sm">No logs available yet.</div>
+              )}
+
+              {logEntries.data?.truncated && (
+                <div className="text-muted-foreground text-xs">
+                  Showing the most recent entries. Increase the limit to see more history.
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Actions */}
       <Card>

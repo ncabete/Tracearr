@@ -6,6 +6,8 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import { promises as fs } from 'node:fs';
+import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
@@ -23,6 +25,69 @@ import {
   terminationLogs,
   plexAccounts,
 } from '../db/schema.js';
+
+// Gate log explorer feature to supervised deployments only
+const SUPERVISED_TAG = (process.env.APP_TAG ?? '').toLowerCase();
+const IS_SUPERVISED = SUPERVISED_TAG.includes('supervised');
+
+// Specify accessible supervised log files
+const SUPERVISOR_LOG_DIR = '/var/log/supervisor';
+const SUPERVISOR_LOG_FILES = [
+  'tracearr.log',
+  'tracearr-error.log',
+  'postgres.log',
+  'postgres-error.log',
+  'redis.log',
+  'redis-error.log',
+  'supervisord.log',
+];
+const LOG_READ_BYTES = 256 * 1024;
+const LOG_LIMIT_DEFAULT = 200;
+const LOG_LIMIT_MAX = 1000;
+
+type DebugLogEntriesResponse = {
+  entries: string[];
+  truncated: boolean;
+  fileExists: boolean;
+};
+
+const resolveLogPath = (name: string) =>
+  SUPERVISOR_LOG_FILES.includes(name) ? join(SUPERVISOR_LOG_DIR, name) : null;
+
+const readLogTail = async (filePath: string, limit: number): Promise<DebugLogEntriesResponse> => {
+  try {
+    const stats = await fs.stat(filePath);
+    if (stats.size === 0) {
+      return { entries: [], truncated: false, fileExists: true };
+    }
+
+    const readBytes = Math.min(stats.size, LOG_READ_BYTES);
+    const start = Math.max(0, stats.size - readBytes);
+    const handle = await fs.open(filePath, 'r');
+    const buffer = Buffer.alloc(readBytes);
+    await handle.read(buffer, 0, readBytes, start);
+    await handle.close();
+
+    let content = buffer.toString('utf8');
+    if (start > 0) {
+      const firstNewline = content.indexOf('\n');
+      if (firstNewline !== -1) {
+        content = content.slice(firstNewline + 1);
+      }
+    }
+
+    const lines = content.split('\n').filter((line) => line.trim().length > 0);
+    const truncated = start > 0 || lines.length > limit;
+    const entries = lines.slice(-limit).reverse();
+
+    return { entries, truncated, fileExists: true };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { entries: [], truncated: false, fileExists: false };
+    }
+    throw error;
+  }
+};
 
 export const debugRoutes: FastifyPluginAsync = async (app) => {
   // All debug routes require owner
@@ -223,6 +288,55 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /**
+   * GET /debug/logs - Available supervised log files
+   */
+  app.get('/logs', async (_request, reply) => {
+    if (!IS_SUPERVISED) {
+      return reply.notFound('Log explorer is only available in supervised mode');
+    }
+
+    const files = await Promise.all(
+      SUPERVISOR_LOG_FILES.map(async (name) => {
+        const filePath = resolveLogPath(name);
+        if (!filePath) {
+          return { name, exists: false };
+        }
+        try {
+          await fs.stat(filePath);
+          return { name, exists: true };
+        } catch {
+          return { name, exists: false };
+        }
+      })
+    );
+
+    return { files };
+  });
+
+  /**
+   * GET /debug/logs/:name - Tail supervised log file
+   */
+  app.get('/logs/:name', async (request, reply) => {
+    if (!IS_SUPERVISED) {
+      return reply.notFound('Log explorer is only available in supervised mode');
+    }
+
+    const { name } = request.params as { name: string };
+    const { limit } = request.query as { limit?: string };
+    const filePath = resolveLogPath(name);
+    if (!filePath) {
+      return reply.notFound('Log file not found');
+    }
+
+    const parsedLimit = Math.min(
+      Math.max(Number.parseInt(limit ?? String(LOG_LIMIT_DEFAULT), 10) || LOG_LIMIT_DEFAULT, 1),
+      LOG_LIMIT_MAX
+    );
+
+    return readLogTail(filePath, parsedLimit);
+  });
+
+  /**
    * GET /debug/env - Safe environment info (no secrets)
    */
   app.get('/env', async () => {
@@ -242,6 +356,10 @@ export const debugRoutes: FastifyPluginAsync = async (app) => {
         REDIS_URL: process.env.REDIS_URL ? '[set]' : '[not set]',
         ENCRYPTION_KEY: process.env.ENCRYPTION_KEY ? '[set]' : '[not set]',
         GEOIP_DB_PATH: process.env.GEOIP_DB_PATH ?? '[not set]',
+        APP_VERSION: process.env.APP_VERSION ?? '[not set]',
+        APP_TAG: process.env.APP_TAG ?? '[not set]',
+        APP_COMMIT: process.env.APP_COMMIT ?? '[not set]',
+        APP_BUILD_DATE: process.env.APP_BUILD_DATE ?? '[not set]',
       },
     };
   });
