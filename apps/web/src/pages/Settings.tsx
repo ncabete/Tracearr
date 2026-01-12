@@ -65,7 +65,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { PlexServerSelector } from '@/components/auth/PlexServerSelector';
-import { NotificationRoutingMatrix } from '@/components/settings/NotificationRoutingMatrix';
+import { NotificationAgentsManager } from '@/components/settings/notification-agents';
 import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 import { JobsSettings } from '@/components/settings/JobsSettings';
 import { PlexAccountsManager } from '@/components/settings/PlexAccountsManager';
@@ -1038,274 +1038,21 @@ function ServerCard({
 }
 
 function NotificationSettings() {
-  const { data: settings, isLoading } = useSettings();
-  const [testingDiscord, setTestingDiscord] = useState(false);
-  const [testingCustom, setTestingCustom] = useState(false);
-
-  // Debounced save for all fields
-  const discordWebhookField = useDebouncedSave('discordWebhookUrl', settings?.discordWebhookUrl);
-  const customWebhookField = useDebouncedSave('customWebhookUrl', settings?.customWebhookUrl);
-  const webhookFormatField = useDebouncedSave('webhookFormat', settings?.webhookFormat);
-  const ntfyTopicField = useDebouncedSave('ntfyTopic', settings?.ntfyTopic);
-  const ntfyAuthTokenField = useDebouncedSave('ntfyAuthToken', settings?.ntfyAuthToken);
-  const pushoverUserKeyField = useDebouncedSave('pushoverUserKey', settings?.pushoverUserKey);
-  const pushoverApiTokenField = useDebouncedSave('pushoverApiToken', settings?.pushoverApiToken);
-
-  const webhookFormat = (webhookFormatField.value as string) ?? 'json';
-
-  useEffect(() => {
-    if (webhookFormat === 'pushover') {
-      customWebhookField.setValue('https://api.pushover.net/1/messages.json');
-    }
-  }, [webhookFormat, customWebhookField]);
-
-  const handleTestDiscord = async () => {
-    setTestingDiscord(true);
-    try {
-      const result = await api.settings.testWebhook({ type: 'discord' });
-      if (result.success) {
-        toast.success('Test Successful', { description: 'Discord webhook is working correctly' });
-      } else {
-        toast.error('Test Failed', { description: result.error ?? 'Unknown error' });
-      }
-    } catch (err) {
-      toast.error('Test Failed', {
-        description: err instanceof Error ? err.message : 'Failed to send test',
-      });
-    } finally {
-      setTestingDiscord(false);
-    }
-  };
-
-  const handleTestCustom = async () => {
-    setTestingCustom(true);
-    try {
-      const result = await api.settings.testWebhook({
-        type: 'custom',
-        format: webhookFormat as WebhookFormat,
-        ntfyTopic: (ntfyTopicField.value as string) || undefined,
-        ntfyAuthToken: (ntfyAuthTokenField.value as string) || undefined,
-        pushoverUserKey: (pushoverUserKeyField.value as string) || undefined,
-        pushoverApiToken: (pushoverApiTokenField.value as string) || undefined,
-      });
-      if (result.success) {
-        toast.success('Test Successful', { description: 'Custom webhook is working correctly' });
-      } else {
-        toast.error('Test Failed', { description: result.error ?? 'Unknown error' });
-      }
-    } catch (err) {
-      toast.error('Test Failed', {
-        description: err instanceof Error ? err.message : 'Failed to send test',
-      });
-    } finally {
-      setTestingCustom(false);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-6 w-32" />
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="flex items-center justify-between">
-              <Skeleton className="h-10 w-64" />
-              <Skeleton className="h-6 w-11" />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5" />
-            Notification Routing
-          </CardTitle>
-          <CardDescription>Configure which channels receive each notification type</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <NotificationRoutingMatrix
-            discordConfigured={!!settings?.discordWebhookUrl}
-            webhookConfigured={!!settings?.customWebhookUrl}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Webhook Configuration</CardTitle>
-          <CardDescription>Configure webhook URLs for notifications</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            {/* Discord Webhook - with Test button */}
-            <div className="space-y-2">
-              <AutosaveTextField
-                id="discordWebhookUrl"
-                label="Discord Webhook URL"
-                description="Paste your Discord webhook URL to receive notifications in a Discord channel"
-                type="url"
-                placeholder="https://discord.com/api/webhooks/..."
-                value={(discordWebhookField.value as string) ?? ''}
-                onChange={(v) => discordWebhookField.setValue(v)}
-                status={discordWebhookField.status}
-                errorMessage={discordWebhookField.errorMessage}
-                onRetry={discordWebhookField.retry}
-                onReset={discordWebhookField.reset}
-              />
-              {discordWebhookField.value && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleTestDiscord}
-                  disabled={testingDiscord}
-                >
-                  {testingDiscord ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {testingDiscord ? 'Testing...' : 'Test Discord'}
-                </Button>
-              )}
-            </div>
-
-            {/* Custom Webhook URL */}
-            <AutosaveTextField
-              id="customWebhookUrl"
-              label="Custom Webhook URL"
-              description={
-                webhookFormat === 'ntfy'
-                  ? 'Post to your ntfy server root URL (topic is specified separately below)'
-                  : webhookFormat === 'apprise'
-                    ? 'Post to your Apprise API endpoint with notification configuration'
-                    : 'Send notifications to a custom endpoint via POST request'
-              }
-              type="url"
-              placeholder={
-                webhookFormat === 'ntfy'
-                  ? 'https://ntfy.sh/'
-                  : webhookFormat === 'apprise'
-                    ? 'http://apprise:8000/notify/myconfig'
-                    : webhookFormat === 'pushover'
-                      ? 'https://api.pushover.net/1/messages.json'
-                      : 'https://your-service.com/webhook'
-              }
-              value={(customWebhookField.value as string) ?? ''}
-              onChange={(v) => customWebhookField.setValue(v)}
-              status={customWebhookField.status}
-              errorMessage={customWebhookField.errorMessage}
-              onRetry={customWebhookField.retry}
-              onReset={customWebhookField.reset}
-            />
-
-            {/* Webhook Format */}
-            <AutosaveSelectField
-              id="webhookFormat"
-              label="Webhook Format"
-              description="Choose the payload format for your webhook endpoint"
-              value={webhookFormat}
-              onChange={(v) => webhookFormatField.setValue(v as WebhookFormat)}
-              options={[
-                { value: 'json', label: 'Raw JSON (default)' },
-                { value: 'ntfy', label: 'Ntfy' },
-                { value: 'apprise', label: 'Apprise' },
-                { value: 'pushover', label: 'Pushover' },
-              ]}
-              status={webhookFormatField.status}
-              errorMessage={webhookFormatField.errorMessage}
-              onRetry={webhookFormatField.retry}
-              onReset={webhookFormatField.reset}
-            />
-
-            {/* Ntfy-specific fields */}
-            {webhookFormat === 'ntfy' && (
-              <>
-                <AutosaveTextField
-                  id="ntfyTopic"
-                  label="Ntfy Topic"
-                  description="The ntfy topic to publish notifications to"
-                  placeholder="tracearr"
-                  value={(ntfyTopicField.value as string) ?? ''}
-                  onChange={(v) => ntfyTopicField.setValue(v)}
-                  status={ntfyTopicField.status}
-                  errorMessage={ntfyTopicField.errorMessage}
-                  onRetry={ntfyTopicField.retry}
-                  onReset={ntfyTopicField.reset}
-                />
-
-                <AutosaveSecretField
-                  id="ntfyAuthToken"
-                  label="Ntfy Auth Token (Optional)"
-                  description="Required if your ntfy server uses access control. Leave empty for public topics."
-                  placeholder="Enter auth token"
-                  value={(ntfyAuthTokenField.value as string) ?? ''}
-                  onChange={(v) => ntfyAuthTokenField.setValue(v)}
-                  isMasked={!!settings?.ntfyAuthToken && !ntfyAuthTokenField.value}
-                  status={ntfyAuthTokenField.status}
-                  errorMessage={ntfyAuthTokenField.errorMessage}
-                  onRetry={ntfyAuthTokenField.retry}
-                  onReset={ntfyAuthTokenField.reset}
-                />
-              </>
-            )}
-
-            {/* Pushover-specific fields */}
-            {webhookFormat === 'pushover' && (
-              <>
-                <AutosaveTextField
-                  id="pushoverUserKey"
-                  label="Pushover User Key"
-                  description="Your Pushover user key"
-                  placeholder="Enter user key"
-                  value={(pushoverUserKeyField.value as string) ?? ''}
-                  onChange={(v) => pushoverUserKeyField.setValue(v)}
-                  status={pushoverUserKeyField.status}
-                  errorMessage={pushoverUserKeyField.errorMessage}
-                  onRetry={pushoverUserKeyField.retry}
-                  onReset={pushoverUserKeyField.reset}
-                />
-                <AutosaveSecretField
-                  id="pushoverApiToken"
-                  label="Pushover API Token"
-                  description="Your Pushover application API token"
-                  placeholder="Enter API token"
-                  value={(pushoverApiTokenField.value as string) ?? ''}
-                  onChange={(v) => pushoverApiTokenField.setValue(v)}
-                  isMasked={!!settings?.pushoverApiToken && !pushoverApiTokenField.value}
-                  status={pushoverApiTokenField.status}
-                  errorMessage={pushoverApiTokenField.errorMessage}
-                  onRetry={pushoverApiTokenField.retry}
-                  onReset={pushoverApiTokenField.reset}
-                />
-              </>
-            )}
-
-            {/* Test Custom Webhook button */}
-            {customWebhookField.value && (
-              <Button
-                variant="outline"
-                onClick={handleTestCustom}
-                disabled={testingCustom}
-                className="w-full"
-              >
-                {testingCustom ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Testing...
-                  </>
-                ) : (
-                  'Test Custom Webhook'
-                )}
-              </Button>
-            )}
-          </FieldGroup>
-        </CardContent>
-      </Card>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="h-5 w-5" />
+          Notification Agents
+        </CardTitle>
+        <CardDescription>
+          Configure notification channels and select which events each agent should receive.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <NotificationAgentsManager />
+      </CardContent>
+    </Card>
   );
 }
 

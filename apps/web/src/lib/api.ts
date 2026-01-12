@@ -865,7 +865,12 @@ class ApiClient {
     getAll: () => this.request<NotificationChannelRouting[]>('/settings/notifications/routing'),
     update: (
       eventType: NotificationEventType,
-      data: { discordEnabled?: boolean; webhookEnabled?: boolean }
+      data: {
+        discordEnabled?: boolean;
+        webhookEnabled?: boolean;
+        webToastEnabled?: boolean;
+        pushEnabled?: boolean;
+      }
     ) =>
       this.request<NotificationChannelRouting>(`/settings/notifications/routing/${eventType}`, {
         method: 'PATCH',
