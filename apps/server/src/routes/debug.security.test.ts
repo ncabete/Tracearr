@@ -71,6 +71,8 @@ describe('Debug Routes Security', () => {
     { method: 'DELETE', url: '/api/v1/debug/rules' },
     { method: 'POST', url: '/api/v1/debug/reset' },
     { method: 'POST', url: '/api/v1/debug/refresh-aggregates' },
+    { method: 'GET', url: '/api/v1/debug/logs' },
+    { method: 'GET', url: '/api/v1/debug/logs/tracearr.log' },
     { method: 'GET', url: '/api/v1/debug/env' },
   ];
 
@@ -119,8 +121,8 @@ describe('Debug Routes Security', () => {
         // Owner should not get 401 or 403
         expect(res.statusCode).not.toBe(401);
         expect(res.statusCode).not.toBe(403);
-        // Should get 200 or 500 (500 possible due to mocked DB)
-        expect([200, 500]).toContain(res.statusCode);
+        // Should get 200/404/500 (404 possible for non-supervised log endpoints)
+        expect([200, 404, 500]).toContain(res.statusCode);
       }
     );
   });
