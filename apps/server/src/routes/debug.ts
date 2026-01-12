@@ -45,11 +45,11 @@ const LOG_READ_BYTES = 256 * 1024;
 const LOG_LIMIT_DEFAULT = 200;
 const LOG_LIMIT_MAX = 1000;
 
-type DebugLogEntriesResponse = {
+interface DebugLogEntriesResponse {
   entries: string[];
   truncated: boolean;
   fileExists: boolean;
-};
+}
 
 const resolveLogPath = (name: string) =>
   SUPERVISOR_LOG_FILES.includes(name) ? join(SUPERVISOR_LOG_DIR, name) : null;
