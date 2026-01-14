@@ -13,6 +13,7 @@
  * - POST /mobile/pair - Exchange pairing token for JWT
  * - POST /mobile/refresh - Refresh mobile JWT
  * - POST /mobile/push-token - Register push token
+ * - GET /mobile/me - Get current user's profile info
  *
  * Stream management (admin/owner via mobile):
  * - POST /mobile/streams/:id/terminate - Terminate a playback session
@@ -804,6 +805,44 @@ export const mobileRoutes: FastifyPluginAsync = async (app) => {
     return {
       accessToken,
       refreshToken: newRefreshToken,
+    };
+  });
+
+  /**
+   * GET /mobile/me - Get current user's profile info
+   *
+   * Returns the authenticated user's profile for display in mobile app
+   */
+  app.get('/me', { preHandler: [app.requireMobile] }, async (request, reply) => {
+    const authUser = request.user;
+
+    // Get full user info from database
+    const userRow = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        name: users.name,
+        thumbnail: users.thumbnail,
+        email: users.email,
+        role: users.role,
+      })
+      .from(users)
+      .where(eq(users.id, authUser.userId))
+      .limit(1);
+
+    if (userRow.length === 0) {
+      return reply.notFound('User not found');
+    }
+
+    const user = userRow[0]!;
+
+    return {
+      id: user.id,
+      username: user.username,
+      friendlyName: user.name || user.username,
+      thumbUrl: user.thumbnail,
+      email: user.email,
+      role: user.role,
     };
   });
 
