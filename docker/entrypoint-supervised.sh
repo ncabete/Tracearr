@@ -247,15 +247,16 @@ fi
 # =============================================================================
 # Link GeoIP database if exists
 # =============================================================================
-if [ -f /data/tracearr/GeoLite2-City.mmdb ]; then
+if [ -f /data/tracearr/GeoLite2-City.mmdb ] && [ -f /data/tracearr/GeoLite2-ASN.mmdb ]; then
     mkdir -p /app/data
     ln -sf /data/tracearr/GeoLite2-City.mmdb /app/data/GeoLite2-City.mmdb
-    log "GeoIP database linked from /data/tracearr/"
-elif [ -f /app/data/GeoLite2-City.mmdb ]; then
-    log "Using bundled GeoIP database"
+    ln -sf /data/tracearr/GeoLite2-ASN.mmdb /app/data/GeoLite2-ASN.mmdb
+    log "GeoIP databases linked from /data/tracearr/"
+elif [ -f /app/data/GeoLite2-City.mmdb ] && [ -f /app/data/GeoLite2-ASN.mmdb ]; then
+    log "Using bundled GeoIP databases"
 else
-    warn "GeoIP database not found - geolocation features will be limited"
-    warn "Place GeoLite2-City.mmdb in /data/tracearr/ for full functionality"
+    warn "GeoIP databases not found - geolocation features will be limited"
+    warn "Place GeoLite2-City.mmdb and GeoLite2-ASN.mmdb in /data/tracearr/ for full functionality"
 fi
 
 # =============================================================================
