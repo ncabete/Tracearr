@@ -567,8 +567,9 @@ describe('transformActivityToSession', () => {
       expect(session.totalDurationMs).toBeNull();
     });
 
-    it('should handle RuntimeTicks = 0 correctly (not treat as falsy)', () => {
-      // ZERO_RUNTIME_ACTIVITY has RuntimeTicks: 0
+    it('should handle RuntimeTicks = 0 with no PercentComplete fallback', () => {
+      // ZERO_RUNTIME_ACTIVITY has RuntimeTicks: 0 and PercentComplete: 0
+      // Since both are 0, we can't determine the total duration
       const session = transformActivityToSession(
         ZERO_RUNTIME_ACTIVITY as JellystatPlaybackActivity,
         serverId,
@@ -576,10 +577,56 @@ describe('transformActivityToSession', () => {
         mockGeo
       );
 
-      // RuntimeTicks: 0 should result in totalDurationMs: 0, not null
-      expect(session.totalDurationMs).toBe(0);
+      // RuntimeTicks: 0 and PercentComplete: 0 means unknown duration
+      expect(session.totalDurationMs).toBeNull();
       // PositionTicks: 1093790 / 10000 = 109 ms
       expect(session.progressMs).toBe(109);
+    });
+
+    it('should use PercentComplete to derive totalDurationMs when RuntimeTicks is 0', () => {
+      // Create activity with RuntimeTicks: 0 but valid PercentComplete
+      const activityWithPercent = {
+        ...ZERO_RUNTIME_ACTIVITY,
+        PlaybackDuration: '1800', // 30 minutes watched
+        PlayState: {
+          ...ZERO_RUNTIME_ACTIVITY.PlayState,
+          RuntimeTicks: 0,
+          PercentComplete: 50, // 50% means total is 60 minutes
+        },
+      };
+
+      const session = transformActivityToSession(
+        activityWithPercent as JellystatPlaybackActivity,
+        serverId,
+        serverUserId,
+        mockGeo
+      );
+
+      // 1800s * 1000ms = 1800000ms watched, at 50% = 3600000ms total (60 min)
+      expect(session.totalDurationMs).toBe(3600000);
+    });
+
+    it('should use PercentComplete to derive totalDurationMs when RuntimeTicks is null', () => {
+      // Create activity with null RuntimeTicks but valid PercentComplete
+      const activityWithPercent = {
+        ...MINIMAL_ACTIVITY,
+        PlaybackDuration: '900', // 15 minutes watched
+        PlayState: {
+          PositionTicks: null,
+          RuntimeTicks: null,
+          PercentComplete: 25, // 25% means total is 60 minutes
+        },
+      };
+
+      const session = transformActivityToSession(
+        activityWithPercent as JellystatPlaybackActivity,
+        serverId,
+        serverUserId,
+        mockGeo
+      );
+
+      // 900s * 1000ms = 900000ms watched, at 25% = 3600000ms total (60 min)
+      expect(session.totalDurationMs).toBe(3600000);
     });
   });
 

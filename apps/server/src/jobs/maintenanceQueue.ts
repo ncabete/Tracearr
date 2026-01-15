@@ -735,20 +735,23 @@ async function processFixImportedProgressJob(
           }
 
           // Calculate totalDurationMs based on watched status
-          // If watched = true, assume they completed it, so total ≈ duration
-          // If watched = false, we can't know the total, so use duration as an estimate
-          // Note: This is a best-effort fix; Tautulli imports now calculate this properly
+          // If watched = true, assume they completed ~85% (typical watch threshold)
+          // If watched = false, we don't know - skip these to avoid showing 100%
+          // Note: This is a best-effort fix for legacy Tautulli imports
           let totalDurationMs: number;
-          if (session.watched) {
-            // If marked as watched, they completed it
-            totalDurationMs = durationMs;
-          } else {
-            // Without percent_complete from the original import, we can't calculate exactly
-            // Use durationMs as the best approximation (their progress position)
-            totalDurationMs = durationMs;
-          }
+          let progressMs: number;
 
-          const progressMs = durationMs;
+          if (session.watched) {
+            // If marked as watched, assume they hit ~85% threshold
+            // So total = durationMs / 0.85 (inverse of watch threshold)
+            totalDurationMs = Math.round(durationMs / 0.85);
+            progressMs = durationMs;
+          } else {
+            // Without percent_complete, we can't calculate total duration
+            // Skip these - better to show "unknown" than incorrect 100%
+            totalSkipped++;
+            continue;
+          }
 
           // Check if update is actually needed
           if (session.progressMs === progressMs && session.totalDurationMs === totalDurationMs) {

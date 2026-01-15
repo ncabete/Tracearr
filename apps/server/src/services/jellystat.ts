@@ -331,10 +331,24 @@ export function transformActivityToSession(
     activity.PlayState?.PositionTicks != null
       ? Math.floor(activity.PlayState.PositionTicks / TICKS_TO_MS)
       : null;
-  const totalDurationMs =
-    activity.PlayState?.RuntimeTicks != null
-      ? Math.floor(activity.PlayState.RuntimeTicks / TICKS_TO_MS)
-      : null;
+
+  // Get PercentComplete from PlayState (available via looseObject but not typed)
+  const playStateAny = activity.PlayState as Record<string, unknown> | null | undefined;
+  const percentComplete =
+    typeof playStateAny?.PercentComplete === 'number' ? playStateAny.PercentComplete : null;
+
+  // Calculate totalDurationMs, preferring RuntimeTicks but falling back to PercentComplete
+  // When RuntimeTicks is missing/zero, derive total from: durationMs * 100 / percentComplete
+  let totalDurationMs: number | null = null;
+  if (activity.PlayState?.RuntimeTicks != null && activity.PlayState.RuntimeTicks > 0) {
+    // Primary: use RuntimeTicks directly
+    totalDurationMs = Math.floor(activity.PlayState.RuntimeTicks / TICKS_TO_MS);
+  } else if (percentComplete != null && percentComplete > 0 && durationMs > 0) {
+    // Fallback: derive from PercentComplete (like Tautulli import does)
+    // e.g., if 50% watched and watched 1000ms, total = 2000ms
+    totalDurationMs = Math.round((durationMs * 100) / percentComplete);
+  }
+  // If both are unavailable, totalDurationMs stays null
 
   // Detect media type from SeriesName and MediaStreams
   // Music tracks have no video stream but have audio stream
