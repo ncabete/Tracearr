@@ -18,6 +18,7 @@ import {
   Zap,
   Monitor,
   Globe,
+  Clock,
   AlertTriangle,
   Check,
   Filter,
@@ -51,6 +52,7 @@ const ruleIcons: Record<RuleType, LucideIcon> = {
   device_velocity: Zap,
   concurrent_streams: Monitor,
   geo_restriction: Globe,
+  inactive_user: Clock,
 };
 
 // Rule type display names
@@ -60,6 +62,7 @@ const ruleLabels: Record<RuleType, string> = {
   device_velocity: 'Device Velocity',
   concurrent_streams: 'Concurrent Streams',
   geo_restriction: 'Geo Restriction',
+  inactive_user: 'Inactive Users',
 };
 
 // Format violation data into readable description based on rule type
@@ -118,6 +121,17 @@ function getViolationDescription(
         return `Streaming from blocked region: ${country || blockedCountry}`;
       }
       return 'Streaming from restricted location';
+    }
+    case 'inactive_user': {
+      const daysInactive = data.daysInactive as number | undefined;
+      const inactiveDays = data.inactiveDays as number | undefined;
+      if (daysInactive && inactiveDays) {
+        return `No activity for ${daysInactive} days (threshold: ${inactiveDays} days)`;
+      }
+      if (daysInactive) {
+        return `No activity for ${daysInactive} days`;
+      }
+      return 'User has been inactive longer than allowed';
     }
     default:
       return 'Rule violation detected';
