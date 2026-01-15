@@ -252,12 +252,18 @@ export const geoRestrictionParamsSchema = z.object({
   countries: z.array(z.string().length(2)).default([]),
 });
 
+export const inactiveUserParamsSchema = z.object({
+  inactiveDays: z.number().int().positive().default(30),
+  stickyAcknowledgement: z.boolean().default(false),
+});
+
 export const ruleParamsSchema = z.union([
   impossibleTravelParamsSchema,
   simultaneousLocationsParamsSchema,
   deviceVelocityParamsSchema,
   concurrentStreamsParamsSchema,
   geoRestrictionParamsSchema,
+  inactiveUserParamsSchema,
 ]);
 
 export const createRuleSchema = z.object({
@@ -268,6 +274,7 @@ export const createRuleSchema = z.object({
     'device_velocity',
     'concurrent_streams',
     'geo_restriction',
+    'inactive_user',
   ]),
   params: z.record(z.string(), z.unknown()),
   serverUserId: uuidSchema.nullable().default(null),

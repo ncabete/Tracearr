@@ -336,7 +336,8 @@ export type RuleType =
   | 'simultaneous_locations'
   | 'device_velocity'
   | 'concurrent_streams'
-  | 'geo_restriction';
+  | 'geo_restriction'
+  | 'inactive_user';
 
 export interface ImpossibleTravelParams {
   maxSpeedKmh: number;
@@ -375,12 +376,18 @@ export interface GeoRestrictionParams {
   excludePrivateIps?: boolean;
 }
 
+export interface InactiveUserParams {
+  inactiveDays: number;
+  stickyAcknowledgement?: boolean;
+}
+
 export type RuleParams =
   | ImpossibleTravelParams
   | SimultaneousLocationsParams
   | DeviceVelocityParams
   | ConcurrentStreamsParams
-  | GeoRestrictionParams;
+  | GeoRestrictionParams
+  | InactiveUserParams;
 
 export interface Rule {
   id: string;

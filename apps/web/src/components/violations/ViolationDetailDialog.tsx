@@ -38,6 +38,7 @@ const ruleIcons: Record<string, React.ReactNode> = {
   device_velocity: <Zap className="h-4 w-4" />,
   concurrent_streams: <Shield className="h-4 w-4" />,
   geo_restriction: <Globe className="h-4 w-4" />,
+  inactive_user: <Clock className="h-4 w-4" />,
 };
 
 interface ViolationDetailDialogProps {

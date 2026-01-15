@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Pencil, Trash2, Shield, MapPin, Zap, Users, Globe } from 'lucide-react';
+import { Plus, Pencil, Trash2, Shield, MapPin, Zap, Users, Globe, Clock } from 'lucide-react';
 import { CountryMultiSelect } from '@/components/ui/country-multi-select';
 import { getCountryName } from '@/lib/utils';
 import type { Rule, RuleType, RuleParams, UnitSystem } from '@tracearr/shared';
@@ -73,6 +73,12 @@ const RULE_TYPES: { value: RuleType; label: string; icon: React.ReactNode; descr
       icon: <Globe className="h-4 w-4" />,
       description: 'Block streaming from specific countries',
     },
+    {
+      value: 'inactive_user',
+      label: 'Inactive Users',
+      icon: <Clock className="h-4 w-4" />,
+      description: 'Flag users who have not started a stream in N days',
+    },
   ];
 
 const DEFAULT_PARAMS: Record<RuleType, RuleParams> = {
@@ -81,6 +87,7 @@ const DEFAULT_PARAMS: Record<RuleType, RuleParams> = {
   device_velocity: { maxIps: 5, windowHours: 24, excludePrivateIps: false, groupByDevice: false },
   concurrent_streams: { maxStreams: 3, excludePrivateIps: false },
   geo_restriction: { mode: 'blocklist', countries: [], excludePrivateIps: false },
+  inactive_user: { inactiveDays: 30, stickyAcknowledgement: false },
 };
 
 interface RuleFormData {
@@ -336,6 +343,41 @@ function RuleParamsForm({
           onChange={onChange}
         />
       );
+    case 'inactive_user':
+      return (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="inactiveDays">Inactive After (days)</Label>
+            <Input
+              id="inactiveDays"
+              type="number"
+              value={(params as { inactiveDays?: number }).inactiveDays ?? 30}
+              onChange={(e) => {
+                onChange({ ...params, inactiveDays: parseInt(e.target.value) || 0 });
+              }}
+            />
+            <p className="text-muted-foreground text-xs">
+              Users with no streams for this many days will trigger a violation.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Sticky Acknowledgement</p>
+              <p className="text-muted-foreground text-xs">
+                Don’t re-trigger until the user becomes active again.
+              </p>
+            </div>
+            <Switch
+              checked={
+                (params as { stickyAcknowledgement?: boolean }).stickyAcknowledgement ?? false
+              }
+              onCheckedChange={(checked) => {
+                onChange({ ...params, stickyAcknowledgement: checked });
+              }}
+            />
+          </div>
+        </div>
+      );
     default:
       return null;
   }
@@ -536,6 +578,14 @@ function RuleCard({
                       </span>
                     );
                   })()}
+                {rule.type === 'inactive_user' && (
+                  <span>
+                    Inactive after {(rule.params as { inactiveDays: number }).inactiveDays} days
+                    {(rule.params as { stickyAcknowledgement?: boolean }).stickyAcknowledgement
+                      ? ' • Sticky acknowledge'
+                      : ''}
+                  </span>
+                )}
               </div>
             </div>
           </div>

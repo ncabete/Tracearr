@@ -43,6 +43,7 @@ export const ruleTypeEnum = [
   'device_velocity',
   'concurrent_streams',
   'geo_restriction',
+  'inactive_user',
 ] as const;
 
 // Violation severity enum

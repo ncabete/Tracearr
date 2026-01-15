@@ -39,6 +39,7 @@ export type {
   ConcurrentStreamsParams,
   GeoRestrictionMode,
   GeoRestrictionParams,
+  InactiveUserParams,
   RuleParams,
   Rule,
   // Violation
@@ -185,6 +186,7 @@ export {
   deviceVelocityParamsSchema,
   concurrentStreamsParamsSchema,
   geoRestrictionParamsSchema,
+  inactiveUserParamsSchema,
   ruleParamsSchema,
   createRuleSchema,
   updateRuleSchema,

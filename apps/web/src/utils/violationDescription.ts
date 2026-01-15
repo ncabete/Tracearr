@@ -60,6 +60,17 @@ export function getViolationDescription(
       }
       return 'Streaming from restricted location';
     }
+    case 'inactive_user': {
+      const daysInactive = data.daysInactive as number | undefined;
+      const inactiveDays = data.inactiveDays as number | undefined;
+      if (daysInactive && inactiveDays) {
+        return `No activity for ${daysInactive} days (threshold: ${inactiveDays} days)`;
+      }
+      if (daysInactive) {
+        return `No activity for ${daysInactive} days`;
+      }
+      return 'User has been inactive longer than allowed';
+    }
     default:
       return 'Rule violation detected';
   }
@@ -162,6 +173,21 @@ export function getViolationDetails(
       if (data.country) details['Country'] = data.country;
       if (data.blockedCountry) details['Blocked Country'] = data.blockedCountry;
       if (data.ipAddress) details['IP Address'] = data.ipAddress;
+      break;
+    }
+    case 'inactive_user': {
+      if (typeof data.daysInactive === 'number') {
+        details['Days Inactive'] = data.daysInactive;
+      }
+      if (typeof data.inactiveDays === 'number') {
+        details['Threshold (Days)'] = data.inactiveDays;
+      }
+      if (typeof data.lastActivityAt === 'string') {
+        const lastActivityDate = new Date(data.lastActivityAt);
+        if (!Number.isNaN(lastActivityDate.getTime())) {
+          details['Last Activity'] = lastActivityDate.toLocaleString();
+        }
+      }
       break;
     }
   }

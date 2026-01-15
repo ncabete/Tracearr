@@ -61,6 +61,11 @@ import { geoipService } from './services/geoip.js';
 import { geoasnService } from './services/geoasn.js';
 import { createCacheService, createPubSubService } from './services/cache.js';
 import { initializePoller, startPoller, stopPoller } from './jobs/poller/index.js';
+import {
+  initializeInactiveUserRuleJob,
+  startInactiveUserRuleJob,
+  stopInactiveUserRuleJob,
+} from './jobs/inactiveUserRule.js';
 import { sseManager } from './services/sseManager.js';
 import {
   initializeSSEProcessor,
@@ -298,6 +303,10 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
   // Initialize poller with cache services
   initializePoller(cacheService, pubSubService);
 
+  // Initialize and start inactive user rule job
+  initializeInactiveUserRuleJob(pubSubService);
+  startInactiveUserRuleJob();
+
   // Initialize SSE manager and processor for real-time Plex updates
   try {
     await sseManager.initialize(cacheService, pubSubService);
@@ -315,6 +324,7 @@ async function buildApp(options: { trustProxy?: boolean } = {}) {
     }
     await pubSubRedis.quit();
     stopPoller();
+    stopInactiveUserRuleJob();
     await sseManager.stop();
     stopSSEProcessor();
     await shutdownNotificationQueue();

@@ -55,7 +55,7 @@ const VIOLATION_DEDUP_WINDOW_MS = 5 * TIME_MS.MINUTE;
 const MULTI_SESSION_RULES: RuleType[] = ['concurrent_streams', 'simultaneous_locations'];
 
 // Rules that are user-level (any recent violation for same user = duplicate)
-const USER_LEVEL_RULES: RuleType[] = ['device_velocity'];
+const USER_LEVEL_RULES: RuleType[] = ['device_velocity', 'inactive_user'];
 
 // Rules that are single-session (need same-session deduplication)
 // Each session can independently violate these rules

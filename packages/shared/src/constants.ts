@@ -28,6 +28,10 @@ export const RULE_DEFAULTS = {
     countries: [],
     excludePrivateIps: false,
   },
+  inactive_user: {
+    inactiveDays: 30,
+    stickyAcknowledgement: false,
+  },
 } as const;
 
 // Rule type display names
@@ -37,6 +41,7 @@ export const RULE_DISPLAY_NAMES = {
   device_velocity: 'Device Velocity',
   concurrent_streams: 'Concurrent Streams',
   geo_restriction: 'Geo Restriction',
+  inactive_user: 'Inactive Users',
 } as const;
 
 // Severity levels

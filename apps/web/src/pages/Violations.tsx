@@ -33,6 +33,7 @@ import {
   Zap,
   Shield,
   Globe,
+  Clock,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -46,6 +47,7 @@ const ruleIcons: Record<string, React.ReactNode> = {
   device_velocity: <Zap className="h-4 w-4" />,
   concurrent_streams: <Shield className="h-4 w-4" />,
   geo_restriction: <Globe className="h-4 w-4" />,
+  inactive_user: <Clock className="h-4 w-4" />,
 };
 
 // Map DataTable column IDs to API sort field names
