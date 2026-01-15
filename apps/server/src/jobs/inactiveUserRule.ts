@@ -9,10 +9,10 @@ import { and, eq, lt, isNotNull, sql } from 'drizzle-orm';
 import type { Rule, RuleParams, InactiveUserParams } from '@tracearr/shared';
 import { TIME_MS } from '@tracearr/shared';
 import { db } from '../db/client.js';
-import { rules, serverUsers, sessions } from '../db/schema.js';
+import { rules, serverUsers } from '../db/schema.js';
 import type { RuleEvaluationResult } from '../services/rules.js';
 import type { PubSubService } from '../services/cache.js';
-import { createViolation } from './poller/violations.js';
+import { broadcastViolations, createViolationInTransaction } from './poller/violations.js';
 
 export interface InactiveUserRuleJobConfig {
   enabled: boolean;
@@ -167,7 +167,13 @@ async function evaluateInactiveRules(): Promise<void> {
           },
         };
 
-        await createViolation(rule.id, user.id, sessionId, result, rule, pubSubService);
+        const violationResult = await db.transaction((tx) =>
+          createViolationInTransaction(tx, rule.id, user.id, sessionId, result, rule)
+        );
+
+        if (violationResult) {
+          await broadcastViolations([violationResult], sessionId, pubSubService);
+        }
       }
     }
   } catch (error) {
