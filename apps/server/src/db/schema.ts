@@ -115,6 +115,9 @@ export const users = pgTable(
     passwordHash: text('password_hash'), // bcrypt hash for local login
     plexAccountId: varchar('plex_account_id', { length: 255 }), // Plex.tv global account ID for OAuth
 
+    // Public API access
+    apiToken: varchar('api_token', { length: 60 }), // Public API key (format: trr_pub_<base64url>)
+
     // Access control - combined permission level and account status
     // Can log in: 'owner', 'admin', 'viewer'
     // Cannot log in: 'member' (default), 'disabled', 'pending'
