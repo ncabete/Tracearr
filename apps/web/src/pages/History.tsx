@@ -257,7 +257,7 @@ export function History() {
       key: 'delete',
       label: 'Delete',
       icon: <Trash2 className="h-4 w-4" />,
-      color: 'destructive',
+      variant: 'destructive',
       onClick: () => setBulkDeleteConfirmOpen(true),
       isLoading: bulkDeleteSessions.isPending,
     },
