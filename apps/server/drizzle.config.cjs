@@ -1,10 +1,15 @@
-import { defineConfig } from 'drizzle-kit';
+const { defineConfig } = require('drizzle-kit');
+const { config } = require('dotenv');
+const path = require('path');
+
+// Load .env from project root (../../ from apps/server)
+config({ path: path.resolve(__dirname, '../../.env') });
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL environment variable is required');
 }
 
-export default defineConfig({
+module.exports = defineConfig({
   schema: './src/db/schema.ts',
   out: './src/db/migrations',
   dialect: 'postgresql',
