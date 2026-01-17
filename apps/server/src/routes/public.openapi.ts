@@ -133,7 +133,12 @@ registry.registerPath({
 // ============================================================================
 
 const StreamsQuery = z.object({
-  serverId: ServerIdParam.optional(),
+  serverId: ServerIdParam.optional().openapi({ description: 'Filter to specific server' }),
+  summary: z.coerce.boolean().optional().openapi({
+    description:
+      'If true, returns only summary statistics (omits data array). Useful for lightweight dashboard polling.',
+    example: false,
+  }),
 });
 
 const Stream = z
@@ -205,25 +210,91 @@ const Stream = z
   })
   .openapi('Stream');
 
+const ServerStreamSummary = z
+  .object({
+    serverId: z.uuid(),
+    serverName: z.string().openapi({ example: 'Main Plex Server' }),
+    total: z.number().int().openapi({ example: 3 }),
+    transcodes: z
+      .number()
+      .int()
+      .openapi({ description: 'Streams with video/audio transcoding', example: 1 }),
+    directStreams: z
+      .number()
+      .int()
+      .openapi({ description: 'Streams with container remuxing only', example: 1 }),
+    directPlays: z
+      .number()
+      .int()
+      .openapi({ description: 'Streams playing native format', example: 1 }),
+    totalBitrate: z
+      .string()
+      .openapi({ description: 'Total bandwidth for this server', example: '22.5 Mbps' }),
+  })
+  .openapi('ServerStreamSummary');
+
+const StreamsSummary = z
+  .object({
+    total: z.number().int().openapi({ description: 'Total active streams', example: 5 }),
+    transcodes: z
+      .number()
+      .int()
+      .openapi({ description: 'Streams with video/audio transcoding', example: 2 }),
+    directStreams: z
+      .number()
+      .int()
+      .openapi({ description: 'Streams with container remuxing only', example: 1 }),
+    directPlays: z
+      .number()
+      .int()
+      .openapi({ description: 'Streams playing native format', example: 2 }),
+    totalBitrate: z
+      .string()
+      .openapi({ description: 'Total bandwidth of all streams', example: '45.2 Mbps' }),
+    byServer: z.array(ServerStreamSummary).openapi({ description: 'Breakdown by server' }),
+  })
+  .openapi('StreamsSummary');
+
 const StreamsResponse = z
   .object({
-    data: z.array(Stream),
-    meta: z.object({ total: z.number().int() }),
+    data: z
+      .array(Stream)
+      .openapi({ description: 'Array of active streams (omitted when summary=true)' }),
+    summary: StreamsSummary,
   })
   .openapi('StreamsResponse');
+
+const StreamsSummaryOnlyResponse = z
+  .object({
+    summary: StreamsSummary,
+  })
+  .openapi('StreamsSummaryOnlyResponse');
 
 registry.registerPath({
   method: 'get',
   path: '/api/v1/public/streams',
   tags: ['Public API'],
   summary: 'Currently active playback sessions',
-  description: 'Returns all active streams. Optionally filter by server.',
+  description: `Returns all active streams with aggregated statistics.
+
+**Response modes:**
+- Default: Returns \`{ data: [...], summary: {...} }\`
+- With \`summary=true\`: Returns \`{ summary: {...} }\` only (lighter payload for dashboards)
+
+**Summary includes:**
+- Total stream counts and transcode breakdown
+- Per-server statistics with bandwidth
+- Formatted bitrate strings (e.g., "45.2 Mbps")`,
   security: [{ bearerAuth: [] }],
   request: { query: StreamsQuery },
   responses: {
     200: {
       description: 'Active streams retrieved successfully',
-      content: { 'application/json': { schema: StreamsResponse } },
+      content: {
+        'application/json': {
+          schema: z.union([StreamsResponse, StreamsSummaryOnlyResponse]),
+        },
+      },
     },
     401: { description: 'Invalid or missing API key' },
   },
@@ -236,7 +307,7 @@ registry.registerPath({
 const UsersQuery = z.object({
   page: z.coerce.number().int().positive().default(1).openapi({ example: 1 }),
   pageSize: z.coerce.number().int().positive().max(100).default(25).openapi({ example: 25 }),
-  serverId: ServerIdParam.optional(),
+  serverId: ServerIdParam.optional().openapi({ description: 'Filter to specific server' }),
 });
 
 const User = z
@@ -285,9 +356,9 @@ registry.registerPath({
 // ============================================================================
 
 const ViolationsQuery = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(25),
-  serverId: ServerIdParam.optional(),
+  page: z.coerce.number().int().positive().default(1).openapi({ example: 1 }),
+  pageSize: z.coerce.number().int().positive().max(100).default(25).openapi({ example: 25 }),
+  serverId: ServerIdParam.optional().openapi({ description: 'Filter to specific server' }),
   severity: z
     .enum(['low', 'warning', 'high'])
     .optional()
@@ -349,11 +420,17 @@ registry.registerPath({
 // ============================================================================
 
 const HistoryQuery = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(25),
-  serverId: ServerIdParam.optional(),
-  state: z.enum(['playing', 'paused', 'stopped']).optional(),
-  mediaType: z.enum(['movie', 'episode', 'track', 'live', 'photo', 'unknown']).optional(),
+  page: z.coerce.number().int().positive().default(1).openapi({ example: 1 }),
+  pageSize: z.coerce.number().int().positive().max(100).default(25).openapi({ example: 25 }),
+  serverId: ServerIdParam.optional().openapi({ description: 'Filter to specific server' }),
+  state: z
+    .enum(['playing', 'paused', 'stopped'])
+    .optional()
+    .openapi({ description: 'Filter by playback state' }),
+  mediaType: z
+    .enum(['movie', 'episode', 'track', 'live', 'photo', 'unknown'])
+    .optional()
+    .openapi({ description: 'Filter by media type' }),
   startDate: z.coerce
     .date()
     .optional()
@@ -455,6 +532,5 @@ Most endpoints support \`serverId\` to filter results to a specific media server
         url: 'https://github.com/connorgallopo/Tracearr',
       },
     },
-    servers: [{ url: '/' }],
   });
 }

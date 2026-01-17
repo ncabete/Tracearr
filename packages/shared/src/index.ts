@@ -284,6 +284,7 @@ export {
   milesToKm,
   formatDistance,
   formatSpeed,
+  formatBitrate,
   getDistanceUnit,
   getSpeedUnit,
   toMetricDistance,

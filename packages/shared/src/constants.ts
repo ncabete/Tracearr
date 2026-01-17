@@ -295,6 +295,29 @@ export function fromMetricDistance(km: number, unitSystem: UnitSystem): number {
   return km;
 }
 
+/**
+ * Format bitrate for display with appropriate unit (kbps, Mbps, Gbps)
+ * @param kbps - Bitrate in kilobits per second
+ * @returns Formatted string with unit (e.g., "20.5 Mbps", "800 kbps")
+ */
+export function formatBitrate(kbps: number | null | undefined): string {
+  if (!kbps) return '—';
+  if (kbps >= 1_000_000) {
+    // Gbps
+    const gbps = kbps / 1_000_000;
+    const formatted = gbps % 1 === 0 ? gbps.toFixed(0) : gbps.toFixed(1);
+    return `${formatted} Gbps`;
+  }
+  if (kbps >= 1000) {
+    // Mbps
+    const mbps = kbps / 1000;
+    const formatted = mbps % 1 === 0 ? mbps.toFixed(0) : mbps.toFixed(1);
+    return `${formatted} Mbps`;
+  }
+  // kbps
+  return `${kbps} kbps`;
+}
+
 // Time constants in milliseconds (avoid magic numbers)
 export const TIME_MS = {
   SECOND: 1000,

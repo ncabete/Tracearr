@@ -266,6 +266,28 @@
   border-bottom: none !important;
 }
 
+/* Parameters section header (the "Parameters" bar) */
+.swagger-ui .opblock-section-header {
+  background: hsl(var(--muted) / 0.5) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+  box-shadow: none !important;
+  padding: 0.5rem 1rem !important;
+}
+
+.swagger-ui .opblock-section-header h4 {
+  color: hsl(var(--foreground)) !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+.swagger-ui .opblock-section-header label {
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 0.75rem !important;
+}
+
 /* Parameters */
 .swagger-ui .parameters-col_name {
   font-weight: 500 !important;
@@ -397,7 +419,7 @@
   padding: 1.5rem !important;
 }
 
-/* Authorize button */
+/* Authorize button - default state */
 .swagger-ui .btn.authorize {
   border-color: hsl(var(--primary)) !important;
   color: hsl(var(--primary)) !important;
@@ -405,6 +427,17 @@
 
 .swagger-ui .btn.authorize svg {
   fill: hsl(var(--primary)) !important;
+}
+
+/* Authorize button - authorized state (green) */
+.swagger-ui .btn.authorize.locked {
+  border-color: hsl(145 65% 45%) !important;
+  color: hsl(145 65% 45%) !important;
+  background: hsl(145 65% 45% / 0.1) !important;
+}
+
+.swagger-ui .btn.authorize.locked svg {
+  fill: hsl(145 65% 45%) !important;
 }
 
 /* Scheme container (server selector) */

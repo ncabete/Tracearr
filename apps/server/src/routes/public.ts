@@ -17,6 +17,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, desc, sql, and, gte, lte, isNull, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { formatBitrate } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { users, serverUsers, servers, sessions, violations, rules } from '../db/schema.js';
 import { getCacheService } from '../services/cache.js';
@@ -31,6 +32,11 @@ const paginationSchema = z.object({
 // Common filter schema
 const serverFilterSchema = z.object({
   serverId: z.uuid().optional(),
+});
+
+// Streams query schema (extends server filter with summary option)
+const streamsQuerySchema = serverFilterSchema.extend({
+  summary: z.coerce.boolean().optional(),
 });
 
 // Response envelope helper
@@ -61,7 +67,42 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
    * No authentication required - allows integrations to discover the API
    */
   app.get('/docs', async (_request, reply) => {
-    const spec = generateOpenAPIDocument();
+    const spec = generateOpenAPIDocument() as Record<string, unknown>;
+
+    // Fetch actual servers to populate serverId dropdowns
+    const allServers = await db
+      .select({ id: servers.id, name: servers.name })
+      .from(servers)
+      .orderBy(servers.displayOrder);
+
+    if (allServers.length > 0) {
+      const serverIds = allServers.map((s) => s.id);
+      const serverListDescription =
+        'Filter to specific server. Available servers:\n' +
+        allServers.map((s) => `• **${s.name}**: \`${s.id}\``).join('\n');
+
+      const paths = spec.paths as Record<string, Record<string, unknown>> | undefined;
+      if (paths) {
+        for (const pathObj of Object.values(paths)) {
+          for (const methodObj of Object.values(pathObj)) {
+            const method = methodObj as { parameters?: Array<Record<string, unknown>> };
+            if (method.parameters) {
+              for (const param of method.parameters) {
+                if (param.name === 'serverId' && param.in === 'query') {
+                  const schema = param.schema as Record<string, unknown> | undefined;
+                  if (schema) {
+                    schema.enum = serverIds;
+                  }
+                  // Update description to list available servers
+                  param.description = serverListDescription;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     return reply.type('application/json').send(spec);
   });
 
@@ -164,10 +205,14 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /streams - Currently active playback sessions
+   * Query params:
+   *   - serverId: Filter to specific server
+   *   - summary: If true, returns only summary stats (omits data array for lighter payload)
    */
   app.get('/streams', { preHandler: [app.authenticatePublicApi] }, async (request) => {
-    const query = serverFilterSchema.safeParse(request.query);
+    const query = streamsQuerySchema.safeParse(request.query);
     const serverId = query.success ? query.data.serverId : undefined;
+    const summaryOnly = query.success ? query.data.summary : false;
 
     const cacheService = getCacheService();
     let activeSessions = cacheService ? await cacheService.getAllActiveSessions() : [];
@@ -176,44 +221,121 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       activeSessions = activeSessions.filter((s) => s.serverId === serverId);
     }
 
-    const streams = activeSessions.map((session) => ({
-      id: session.id,
-      serverId: session.serverId,
-      serverName: session.server.name,
-      // User info
-      username: session.user.identityName ?? session.user.username,
-      userThumb: session.user.thumbUrl,
-      // Media info
-      mediaTitle: session.mediaTitle,
-      mediaType: session.mediaType,
-      showTitle: session.grandparentTitle,
-      seasonNumber: session.seasonNumber,
-      episodeNumber: session.episodeNumber,
-      year: session.year,
-      thumbPath: session.thumbPath,
-      durationMs: session.durationMs,
-      // Playback state
-      state: session.state,
-      progressMs: session.progressMs ?? 0,
-      startedAt: session.startedAt,
-      // Transcode info
-      isTranscode: session.isTranscode,
-      videoDecision: session.videoDecision,
-      audioDecision: session.audioDecision,
-      bitrate: session.bitrate,
-      // Device info
-      device: session.device,
-      player: session.playerName,
-      product: session.product,
-      platform: session.platform,
-    }));
+    const streams = summaryOnly
+      ? []
+      : activeSessions.map((session) => ({
+          id: session.id,
+          serverId: session.serverId,
+          serverName: session.server.name,
+          // User info
+          username: session.user.identityName ?? session.user.username,
+          userThumb: session.user.thumbUrl,
+          // Media info
+          mediaTitle: session.mediaTitle,
+          mediaType: session.mediaType,
+          showTitle: session.grandparentTitle,
+          seasonNumber: session.seasonNumber,
+          episodeNumber: session.episodeNumber,
+          year: session.year,
+          thumbPath: session.thumbPath,
+          durationMs: session.durationMs,
+          // Playback state
+          state: session.state,
+          progressMs: session.progressMs ?? 0,
+          startedAt: session.startedAt,
+          // Transcode info
+          isTranscode: session.isTranscode,
+          videoDecision: session.videoDecision,
+          audioDecision: session.audioDecision,
+          bitrate: session.bitrate,
+          // Device info
+          device: session.device,
+          player: session.playerName,
+          product: session.product,
+          platform: session.platform,
+        }));
 
-    return {
-      data: streams,
-      meta: {
-        total: streams.length,
-      },
+    const categorizeStream = (session: (typeof activeSessions)[0]) => {
+      // Transcode if either video or audio is being transcoded
+      if (session.isTranscode) return 'transcode';
+      // Direct stream if either video or audio is 'copy' (container remux)
+      if (session.videoDecision === 'copy' || session.audioDecision === 'copy')
+        return 'directStream';
+      // Otherwise it's direct play
+      return 'directPlay';
     };
+
+    let transcodeCount = 0;
+    let directStreamCount = 0;
+    let directPlayCount = 0;
+    let totalBitrate = 0;
+
+    for (const session of activeSessions) {
+      const category = categorizeStream(session);
+      if (category === 'transcode') transcodeCount++;
+      else if (category === 'directStream') directStreamCount++;
+      else directPlayCount++;
+      if (session.bitrate) totalBitrate += session.bitrate;
+    }
+
+    const serverBreakdown: Record<
+      string,
+      {
+        serverId: string;
+        serverName: string;
+        total: number;
+        transcodes: number;
+        directStreams: number;
+        directPlays: number;
+        bitrateKbps: number;
+      }
+    > = {};
+
+    for (const session of activeSessions) {
+      let serverStats = serverBreakdown[session.serverId];
+      if (!serverStats) {
+        serverStats = {
+          serverId: session.serverId,
+          serverName: session.server.name,
+          total: 0,
+          transcodes: 0,
+          directStreams: 0,
+          directPlays: 0,
+          bitrateKbps: 0,
+        };
+        serverBreakdown[session.serverId] = serverStats;
+      }
+      const category = categorizeStream(session);
+      serverStats.total++;
+      if (category === 'transcode') serverStats.transcodes++;
+      else if (category === 'directStream') serverStats.directStreams++;
+      else serverStats.directPlays++;
+      if (session.bitrate) serverStats.bitrateKbps += session.bitrate;
+    }
+
+    const summary = {
+      total: activeSessions.length,
+      transcodes: transcodeCount,
+      directStreams: directStreamCount,
+      directPlays: directPlayCount,
+      totalBitrate: formatBitrate(totalBitrate),
+      byServer: Object.values(serverBreakdown).map((s) => ({
+        serverId: s.serverId,
+        serverName: s.serverName,
+        total: s.total,
+        transcodes: s.transcodes,
+        directStreams: s.directStreams,
+        directPlays: s.directPlays,
+        totalBitrate: formatBitrate(s.bitrateKbps),
+      })),
+    };
+
+    // If summary-only mode, omit the data array for a lighter payload
+    if (summaryOnly) {
+      return { summary };
+    }
+
+    return { data: streams, summary };
   });
 
   /**

@@ -8,14 +8,15 @@ import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type {
-  SourceVideoDetails,
-  SourceAudioDetails,
-  StreamVideoDetails,
-  StreamAudioDetails,
-  TranscodeInfo,
-  SubtitleInfo,
-  ServerType,
+import {
+  formatBitrate,
+  type SourceVideoDetails,
+  type SourceAudioDetails,
+  type StreamVideoDetails,
+  type StreamAudioDetails,
+  type TranscodeInfo,
+  type SubtitleInfo,
+  type ServerType,
 } from '@tracearr/shared';
 import { useState } from 'react';
 
@@ -41,17 +42,6 @@ interface StreamDetailsPanelProps {
   bitrate: number | null;
   // Server type for conditional tooltip
   serverType: ServerType;
-}
-
-// Format bitrate for display
-function formatBitrate(bitrate: number | null | undefined): string {
-  if (!bitrate) return '—';
-  if (bitrate >= 1000) {
-    const mbps = bitrate / 1000;
-    const formatted = mbps % 1 === 0 ? mbps.toFixed(0) : mbps.toFixed(1);
-    return `${formatted} Mbps`;
-  }
-  return `${bitrate} kbps`;
 }
 
 // Component for showing "N/A" with tooltip when stream bitrate is unavailable (Jellyfin/Emby only)
