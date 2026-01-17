@@ -19,7 +19,7 @@ import type {
 import { WS_EVENTS } from '@tracearr/shared';
 import { sql, isNotNull, or, and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { sessions } from '../db/schema.js';
+import { sessions, serverUsers } from '../db/schema.js';
 import { normalizeClient, normalizePlatformName } from '../utils/platformNormalizer.js';
 import { getPubSubService } from '../services/cache.js';
 import { rebuildTimescaleViews } from '../db/timescale.js';
@@ -158,6 +158,8 @@ async function processMaintenanceJob(job: Job<MaintenanceJobData>): Promise<Main
       return processRebuildTimescaleViewsJob(job);
     case 'normalize_codecs':
       return processNormalizeCodecsJob(job);
+    case 'backfill_user_dates':
+      return processBackfillUserDatesJob(job);
     default:
       throw new Error(`Unknown maintenance job type: ${job.data.type}`);
   }
@@ -1080,6 +1082,162 @@ async function processNormalizeCodecsJob(
       errors: totalErrors,
       durationMs,
       message: `Normalized ${totalUpdated.toLocaleString()} codec values to uppercase`,
+    };
+  } catch (error) {
+    if (activeJobProgress) {
+      activeJobProgress.status = 'error';
+      activeJobProgress.message = error instanceof Error ? error.message : 'Unknown error';
+      await publishProgress();
+      activeJobProgress = null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Backfill joinedAt and lastActivityAt for server_users from session history
+ *
+ * Sets:
+ * - joinedAt: Earliest session start time for each user (if currently NULL)
+ * - lastActivityAt: Most recent session start time for each user (always updates)
+ *
+ * This fixes users who were synced before Tracearr tracked activity timestamps,
+ * or where imports didn't populate these fields.
+ */
+async function processBackfillUserDatesJob(
+  job: Job<MaintenanceJobData>
+): Promise<MaintenanceJobResult> {
+  const startTime = Date.now();
+  const pubSubService = getPubSubService();
+
+  // Initialize progress
+  activeJobProgress = {
+    type: 'backfill_user_dates',
+    status: 'running',
+    totalRecords: 0,
+    processedRecords: 0,
+    updatedRecords: 0,
+    skippedRecords: 0,
+    errorRecords: 0,
+    message: 'Counting users needing backfill...',
+    startedAt: new Date().toISOString(),
+  };
+
+  const publishProgress = async () => {
+    if (pubSubService && activeJobProgress) {
+      await pubSubService.publish(WS_EVENTS.MAINTENANCE_PROGRESS, activeJobProgress);
+    }
+  };
+
+  try {
+    await publishProgress();
+
+    // Count users that have sessions but missing dates
+    const [countResult] = await db
+      .select({ count: sql<number>`count(DISTINCT ${serverUsers.id})::int` })
+      .from(serverUsers)
+      .innerJoin(sessions, eq(sessions.serverUserId, serverUsers.id))
+      .where(or(sql`${serverUsers.joinedAt} IS NULL`, sql`${serverUsers.lastActivityAt} IS NULL`));
+
+    const totalRecords = countResult?.count ?? 0;
+    activeJobProgress.totalRecords = totalRecords;
+
+    if (totalRecords === 0) {
+      activeJobProgress.status = 'complete';
+      activeJobProgress.message = 'All users already have activity dates populated';
+      activeJobProgress.completedAt = new Date().toISOString();
+      await publishProgress();
+      activeJobProgress = null;
+
+      return {
+        success: true,
+        type: 'backfill_user_dates',
+        processed: 0,
+        updated: 0,
+        skipped: 0,
+        errors: 0,
+        durationMs: Date.now() - startTime,
+        message: 'All users already have activity dates populated',
+      };
+    }
+
+    activeJobProgress.message = `Backfilling dates for ${totalRecords.toLocaleString()} users...`;
+    await publishProgress();
+
+    let joinedAtUpdated = 0;
+    let lastActivityUpdated = 0;
+    let totalErrors = 0;
+
+    // Step 1: Update joinedAt to earliest session for users with NULL joinedAt
+    activeJobProgress.message = 'Setting joinedAt from earliest sessions...';
+    await publishProgress();
+
+    try {
+      const joinedResult = await db.execute(sql`
+        UPDATE server_users su
+        SET joined_at = earliest.min_started
+        FROM (
+          SELECT server_user_id, MIN(started_at) as min_started
+          FROM sessions
+          GROUP BY server_user_id
+        ) earliest
+        WHERE su.id = earliest.server_user_id
+          AND su.joined_at IS NULL
+      `);
+      joinedAtUpdated = Number(joinedResult.rowCount ?? 0);
+    } catch (error) {
+      console.error('[Maintenance] Error updating joinedAt:', error);
+      totalErrors++;
+    }
+
+    activeJobProgress.processedRecords = joinedAtUpdated;
+    activeJobProgress.message = `Updated joinedAt for ${joinedAtUpdated} users. Now updating lastActivityAt...`;
+    await job.updateProgress(50);
+    await publishProgress();
+
+    // Step 2: Update lastActivityAt to most recent session for all users with sessions
+    // We update even if not NULL to ensure it's the most recent activity
+    try {
+      const activityResult = await db.execute(sql`
+        UPDATE server_users su
+        SET last_activity_at = latest.max_started
+        FROM (
+          SELECT server_user_id, MAX(started_at) as max_started
+          FROM sessions
+          GROUP BY server_user_id
+        ) latest
+        WHERE su.id = latest.server_user_id
+          AND (su.last_activity_at IS NULL OR su.last_activity_at < latest.max_started)
+      `);
+      lastActivityUpdated = Number(activityResult.rowCount ?? 0);
+    } catch (error) {
+      console.error('[Maintenance] Error updating lastActivityAt:', error);
+      totalErrors++;
+    }
+
+    const totalUpdated = joinedAtUpdated + lastActivityUpdated;
+    const durationMs = Date.now() - startTime;
+
+    activeJobProgress.status = 'complete';
+    activeJobProgress.processedRecords = totalRecords;
+    activeJobProgress.updatedRecords = totalUpdated;
+    activeJobProgress.errorRecords = totalErrors;
+    activeJobProgress.message = `Completed! Updated joinedAt for ${joinedAtUpdated} users, lastActivityAt for ${lastActivityUpdated} users in ${Math.round(durationMs / 1000)}s`;
+    activeJobProgress.completedAt = new Date().toISOString();
+    await job.updateProgress(100);
+    await publishProgress();
+
+    activeJobProgress = null;
+
+    return {
+      success: true,
+      type: 'backfill_user_dates',
+      processed: totalRecords,
+      updated: totalUpdated,
+      skipped: 0,
+      errors: totalErrors,
+      durationMs,
+      message: `Updated joinedAt for ${joinedAtUpdated} users, lastActivityAt for ${lastActivityUpdated} users`,
     };
   } catch (error) {
     if (activeJobProgress) {

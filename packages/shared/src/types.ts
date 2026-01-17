@@ -1231,7 +1231,8 @@ export type MaintenanceJobType =
   | 'normalize_countries'
   | 'fix_imported_progress'
   | 'rebuild_timescale_views'
-  | 'normalize_codecs';
+  | 'normalize_codecs'
+  | 'backfill_user_dates';
 
 export type MaintenanceJobStatus = 'idle' | 'running' | 'complete' | 'error';
 

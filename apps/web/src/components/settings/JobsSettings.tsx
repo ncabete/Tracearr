@@ -16,6 +16,7 @@ import {
   ArrowUpDown,
   RefreshCw,
   Globe,
+  Calendar,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
@@ -63,6 +64,7 @@ const JOB_ICONS: Record<string, typeof Database> = {
   fix_imported_progress: RefreshCw,
   rebuild_timescale_views: Database,
   normalize_codecs: ArrowUpDown,
+  backfill_user_dates: Calendar,
 };
 
 function formatDuration(ms: number): string {
@@ -337,7 +339,7 @@ export function JobsSettings() {
                 <p className="text-sm font-medium text-green-600">
                   Last job completed successfully
                 </p>
-                <p className="text-muted-foreground truncate text-xs">{progress.message}</p>
+                <p className="text-muted-foreground text-xs break-words">{progress.message}</p>
               </div>
               <Button
                 variant="ghost"
@@ -355,7 +357,7 @@ export function JobsSettings() {
               <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-red-600">Last job failed</p>
-                <p className="text-muted-foreground truncate text-xs">{progress.message}</p>
+                <p className="text-muted-foreground text-xs break-words">{progress.message}</p>
               </div>
               <Button
                 variant="ghost"
@@ -497,7 +499,7 @@ export function JobsSettings() {
               </p>
             </div>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setConfirmJob(null)}>
               Cancel
             </Button>

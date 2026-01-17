@@ -60,6 +60,13 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
             'Converts all codec names to uppercase for consistency. ' +
             'Run this if you see duplicate codecs in the Compatibility Matrix (e.g., "h264" and "H264").',
         },
+        {
+          type: 'backfill_user_dates',
+          name: 'Backfill User Activity Dates',
+          description:
+            'Populates joinedAt and lastActivityAt for users from session history. ' +
+            'Run this if users show "Unknown" join dates or missing last activity timestamps.',
+        },
       ],
     };
   });
@@ -85,6 +92,7 @@ export const maintenanceRoutes: FastifyPluginAsync = async (app) => {
         'fix_imported_progress',
         'rebuild_timescale_views',
         'normalize_codecs',
+        'backfill_user_dates',
       ];
       if (!validTypes.includes(type as MaintenanceJobType)) {
         return reply.badRequest(`Invalid job type: ${type}`);
