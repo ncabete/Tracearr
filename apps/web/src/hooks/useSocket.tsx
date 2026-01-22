@@ -18,6 +18,10 @@ import type {
   DashboardStats,
   NotificationChannelRouting,
   NotificationEventType,
+  LibrarySyncProgress,
+  TautulliImportProgress,
+  JellystatImportProgress,
+  MaintenanceJobProgress,
 } from '@tracearr/shared';
 import { WS_EVENTS } from '@tracearr/shared';
 import { useAuth } from './useAuth';
@@ -231,6 +235,85 @@ export function SocketProvider({ children }: { children: ReactNode }) {
           toast.success('Server Online', {
             description: `${data.serverName} is back online`,
           });
+        }
+      }
+    );
+
+    // Library sync progress - invalidate library caches when sync completes
+    newSocket.on(
+      WS_EVENTS.LIBRARY_SYNC_PROGRESS as 'library:sync:progress',
+      (progress: LibrarySyncProgress) => {
+        if (progress.status === 'complete' || progress.status === 'error') {
+          // Invalidate all library queries to refresh storage and stale content
+          void queryClient.invalidateQueries({ queryKey: ['library'] });
+        }
+      }
+    );
+
+    // Tautulli import progress - invalidate session data when import completes
+    newSocket.on(
+      WS_EVENTS.IMPORT_PROGRESS as 'import:progress',
+      (progress: TautulliImportProgress) => {
+        if (progress.status === 'complete') {
+          // Invalidate session history and stats after importing watch history
+          void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          void queryClient.invalidateQueries({ queryKey: ['stats'] });
+          void queryClient.invalidateQueries({ queryKey: ['users'] });
+        }
+      }
+    );
+
+    // Jellystat import progress - invalidate session data when import completes
+    newSocket.on(
+      WS_EVENTS.IMPORT_JELLYSTAT_PROGRESS as 'import:jellystat:progress',
+      (progress: JellystatImportProgress) => {
+        if (progress.status === 'complete') {
+          // Invalidate session history and stats after importing watch history
+          void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          void queryClient.invalidateQueries({ queryKey: ['stats'] });
+          void queryClient.invalidateQueries({ queryKey: ['users'] });
+        }
+      }
+    );
+
+    // Maintenance job progress - invalidate relevant caches when jobs complete
+    newSocket.on(
+      WS_EVENTS.MAINTENANCE_PROGRESS as 'maintenance:progress',
+      (progress: MaintenanceJobProgress) => {
+        if (progress.status === 'complete') {
+          // Different jobs affect different data
+          switch (progress.type) {
+            case 'rebuild_timescale_views':
+              // Rebuilding views affects all chart/stats data
+              void queryClient.invalidateQueries({ queryKey: ['library'] });
+              void queryClient.invalidateQueries({ queryKey: ['stats'] });
+              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+              break;
+            case 'normalize_players':
+            case 'normalize_codecs':
+              // These affect session/playback data
+              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+              void queryClient.invalidateQueries({ queryKey: ['library'] });
+              break;
+            case 'normalize_countries':
+              // Affects geographic data in sessions
+              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+              break;
+            case 'fix_imported_progress':
+              // Affects session progress data
+              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+              void queryClient.invalidateQueries({ queryKey: ['stats'] });
+              break;
+            case 'backfill_user_dates':
+              // Affects user data
+              void queryClient.invalidateQueries({ queryKey: ['users'] });
+              break;
+            default:
+              // Unknown job type - invalidate common caches as fallback
+              void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+              void queryClient.invalidateQueries({ queryKey: ['stats'] });
+              break;
+          }
         }
       }
     );
