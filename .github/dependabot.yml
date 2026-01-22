@@ -1,0 +1,41 @@
+version: 2
+
+updates:
+  # All npm packages (single pnpm workspace lockfile)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 10
+    # Only update direct dependencies, ignore transitive
+    allow:
+      - dependency-type: "direct"
+    groups:
+      production:
+        dependency-type: "production"
+      development:
+        dependency-type: "development"
+    commit-message:
+      prefix: "deps"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+
+  # Docker
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(docker)"
