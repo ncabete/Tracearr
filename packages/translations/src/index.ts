@@ -68,7 +68,6 @@ export {
 export type {
   AllResources,
   TranslationResources,
-  TranslationNamespace,
   CommonTranslations,
   NotificationsTranslations,
   SettingsTranslations,
