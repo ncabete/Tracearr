@@ -37,9 +37,9 @@ interface LibraryGrowthResponse {
 
 /**
  * Calculate start date based on period string.
- * Returns null for 'all' which gets capped to 3 years.
+ * Returns null for 'all' which triggers dynamic earliest date lookup.
  */
-function getStartDate(period: '7d' | '30d' | '90d' | '1y' | 'all'): Date {
+function getStartDate(period: '7d' | '30d' | '90d' | '1y' | 'all'): Date | null {
   const now = new Date();
   switch (period) {
     case '7d':
@@ -51,8 +51,7 @@ function getStartDate(period: '7d' | '30d' | '90d' | '1y' | 'all'): Date {
     case '1y':
       return new Date(now.getTime() - 365 * TIME_MS.DAY);
     case 'all':
-      // Cap "all" to 3 years to prevent unbounded queries
-      return new Date(now.getTime() - 3 * 365 * TIME_MS.DAY);
+      return null;
   }
 }
 
@@ -114,6 +113,22 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
       const startDate = getStartDate(period);
       const endDate = new Date();
 
+      // For 'all' period, find the earliest snapshot date from library_snapshots
+      let effectiveStartDate: Date;
+      if (startDate) {
+        effectiveStartDate = startDate;
+      } else {
+        const earliestResult = await db.execute(sql`
+          SELECT MIN(snapshot_time)::date AS earliest
+          FROM library_snapshots ls
+          WHERE 1=1
+            ${serverFilter}
+            ${libraryFilter}
+        `);
+        const earliest = (earliestResult.rows[0] as { earliest: string | null })?.earliest;
+        effectiveStartDate = earliest ? new Date(earliest) : new Date('2020-01-01');
+      }
+
       // Query from library_snapshots - much more efficient than generate_series
       // Snapshots are point-in-time markers - use MAX per library per day, then SUM across libraries
       const result = await db.execute(sql`
@@ -127,7 +142,7 @@ export const libraryGrowthRoute: FastifyPluginAsync = async (app) => {
             MAX(ls.episode_count) AS episodes,
             MAX(ls.music_count) AS music
           FROM library_snapshots ls
-          WHERE ls.snapshot_time >= ${startDate.toISOString()}::timestamptz
+          WHERE ls.snapshot_time >= ${effectiveStartDate.toISOString()}::timestamptz
             AND ls.snapshot_time <= ${endDate.toISOString()}::timestamptz
             ${serverFilter}
             ${libraryFilter}
