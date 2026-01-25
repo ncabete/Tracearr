@@ -23,7 +23,10 @@ import { sessions, serverUsers } from '../db/schema.js';
 import { normalizeClient, normalizePlatformName } from '../utils/platformNormalizer.js';
 import { getPubSubService } from '../services/cache.js';
 import { rebuildTimescaleViews } from '../db/timescale.js';
-import { INVALID_SNAPSHOT_CONDITION } from '../utils/snapshotValidation.js';
+import {
+  INVALID_SNAPSHOT_CONDITION,
+  VALID_LIBRARY_ITEM_CONDITION,
+} from '../utils/snapshotValidation.js';
 import countries from 'i18n-iso-countries';
 import countriesEn from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
 
@@ -1302,6 +1305,11 @@ async function processBackfillLibrarySnapshotsJob(
   const startTime = Date.now();
   const pubSubService = getPubSubService();
 
+  // Batch size in days to avoid exhausting PostgreSQL's lock table
+  // TimescaleDB hypertables create locks per chunk, so large date ranges
+  // spanning many chunks can hit max_locks_per_transaction limits
+  const BATCH_SIZE_DAYS = 90;
+
   // Initialize progress
   activeJobProgress = {
     type: 'backfill_library_snapshots',
@@ -1325,6 +1333,10 @@ async function processBackfillLibrarySnapshotsJob(
     await publishProgress();
 
     // Get all server+library combinations with their date ranges
+    // Only consider items with valid file_size (consistent with INVALID_SNAPSHOT_CONDITION
+    // which deletes snapshots with total_size=0). This prevents an infinite loop where
+    // backfill creates snapshots for items without file_size, cleanup deletes them,
+    // and the next check triggers backfill again.
     const librariesResult = await db.execute(sql`
       SELECT
         server_id,
@@ -1334,6 +1346,7 @@ async function processBackfillLibrarySnapshotsJob(
         COUNT(*) AS item_count
       FROM library_items
       WHERE created_at IS NOT NULL
+        AND ${VALID_LIBRARY_ITEM_CONDITION}
       GROUP BY server_id, library_id
     `);
 
@@ -1347,7 +1360,7 @@ async function processBackfillLibrarySnapshotsJob(
 
     if (libraries.length === 0) {
       activeJobProgress.status = 'complete';
-      activeJobProgress.message = 'No libraries found to backfill';
+      activeJobProgress.message = 'No libraries with valid items found to backfill';
       activeJobProgress.completedAt = new Date().toISOString();
       await publishProgress();
       activeJobProgress = null;
@@ -1360,7 +1373,7 @@ async function processBackfillLibrarySnapshotsJob(
         skipped: 0,
         errors: 0,
         durationMs: Date.now() - startTime,
-        message: 'No libraries found to backfill',
+        message: 'No libraries with valid items found to backfill',
       };
     }
 
@@ -1374,113 +1387,151 @@ async function processBackfillLibrarySnapshotsJob(
 
     for (const lib of libraries) {
       try {
-        // Insert daily snapshots for this library using window functions
-        // This reconstructs historical state from item creation dates
-        const result = await db.execute(sql`
-          INSERT INTO library_snapshots (
-            server_id, library_id, snapshot_time,
-            item_count, total_size,
-            movie_count, episode_count, season_count, show_count, music_count,
-            count_4k, count_1080p, count_720p, count_sd,
-            hevc_count, h264_count, av1_count,
-            enrichment_pending, enrichment_complete
-          )
-          WITH daily_additions AS (
-            -- Get per-day additions with all metrics
-            SELECT
-              DATE(created_at) AS day,
-              COUNT(*) AS items,
-              COALESCE(SUM(file_size), 0) AS size,
-              COUNT(*) FILTER (WHERE media_type = 'movie') AS movies,
-              COUNT(*) FILTER (WHERE media_type = 'episode') AS episodes,
-              COUNT(*) FILTER (WHERE media_type = 'season') AS seasons,
-              COUNT(*) FILTER (WHERE media_type = 'show') AS shows,
-              COUNT(*) FILTER (WHERE media_type IN ('artist', 'album', 'track')) AS music,
-              COUNT(*) FILTER (WHERE video_resolution = '4k') AS c4k,
-              COUNT(*) FILTER (WHERE video_resolution = '1080p') AS c1080p,
-              COUNT(*) FILTER (WHERE video_resolution = '720p') AS c720p,
-              COUNT(*) FILTER (WHERE video_resolution IN ('480p', 'sd')
-                                OR (video_resolution IS NOT NULL
-                                    AND video_resolution NOT IN ('4k', '1080p', '720p'))) AS csd,
-              COUNT(*) FILTER (WHERE video_codec IN ('hevc', 'h265', 'x265', 'HEVC', 'H265', 'X265')) AS hevc,
-              COUNT(*) FILTER (WHERE video_codec IN ('h264', 'avc', 'x264', 'H264', 'AVC', 'X264')) AS h264,
-              COUNT(*) FILTER (WHERE video_codec IN ('av1', 'AV1')) AS av1
-            FROM library_items
-            WHERE server_id = ${lib.server_id}::uuid
-              AND library_id = ${lib.library_id}
-            GROUP BY DATE(created_at)
-          ),
-          date_series AS (
-            SELECT d::date AS day FROM generate_series(
-              ${lib.start_date}::date, ${lib.end_date}::date, '1 day'
-            ) d
-          ),
-          filled AS (
-            SELECT ds.day,
-              COALESCE(da.items, 0) AS items, COALESCE(da.size, 0) AS size,
-              COALESCE(da.movies, 0) AS movies, COALESCE(da.episodes, 0) AS episodes,
-              COALESCE(da.seasons, 0) AS seasons, COALESCE(da.shows, 0) AS shows,
-              COALESCE(da.music, 0) AS music,
-              COALESCE(da.c4k, 0) AS c4k, COALESCE(da.c1080p, 0) AS c1080p,
-              COALESCE(da.c720p, 0) AS c720p, COALESCE(da.csd, 0) AS csd,
-              COALESCE(da.hevc, 0) AS hevc, COALESCE(da.h264, 0) AS h264,
-              COALESCE(da.av1, 0) AS av1
-            FROM date_series ds
-            LEFT JOIN daily_additions da ON da.day = ds.day
-          ),
-          cumulative AS (
-            SELECT
-              f.day,
-              -- Cumulative counts using window functions
-              SUM(items) OVER w AS item_count,
-              SUM(size) OVER w AS total_size,
-              SUM(movies) OVER w AS movie_count,
-              SUM(episodes) OVER w AS episode_count,
-              SUM(seasons) OVER w AS season_count,
-              SUM(shows) OVER w AS show_count,
-              SUM(music) OVER w AS music_count,
-              SUM(c4k) OVER w AS count_4k,
-              SUM(c1080p) OVER w AS count_1080p,
-              SUM(c720p) OVER w AS count_720p,
-              SUM(csd) OVER w AS count_sd,
-              SUM(hevc) OVER w AS hevc_count,
-              SUM(h264) OVER w AS h264_count,
-              SUM(av1) OVER w AS av1_count
-            FROM filled f
-            WINDOW w AS (ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-          )
-          SELECT
-            ${lib.server_id}::uuid,
-            ${lib.library_id},
-            (c.day + INTERVAL '23 hours 59 minutes 59 seconds')::timestamptz,
-            c.item_count::int,
-            c.total_size::bigint,
-            c.movie_count::int,
-            c.episode_count::int,
-            c.season_count::int,
-            c.show_count::int,
-            c.music_count::int,
-            c.count_4k::int,
-            c.count_1080p::int,
-            c.count_720p::int,
-            c.count_sd::int,
-            c.hevc_count::int,
-            c.h264_count::int,
-            c.av1_count::int,
-            0,  -- enrichment_pending: all historical items already enriched
-            c.item_count::int  -- enrichment_complete
-          FROM cumulative c
-          -- Skip days that already have snapshots (idempotent)
-          WHERE NOT EXISTS (
-            SELECT 1 FROM library_snapshots ls
-            WHERE ls.server_id = ${lib.server_id}::uuid
-              AND ls.library_id = ${lib.library_id}
-              AND DATE(ls.snapshot_time) = c.day
-          )
-        `);
+        // Calculate date range for this library
+        const libStartDate = new Date(lib.start_date);
+        const libEndDate = new Date(lib.end_date);
+        let librarySnapshotsCreated = 0;
 
-        const snapshotsCreated = Number(result.rowCount ?? 0);
-        totalSnapshotsCreated += snapshotsCreated;
+        // Process in batches to avoid exhausting lock table
+        let batchStart = libStartDate;
+        while (batchStart <= libEndDate) {
+          const batchEnd = new Date(batchStart);
+          batchEnd.setDate(batchEnd.getDate() + BATCH_SIZE_DAYS - 1);
+          if (batchEnd > libEndDate) {
+            batchEnd.setTime(libEndDate.getTime());
+          }
+
+          const batchStartStr = batchStart.toISOString().split('T')[0];
+          const batchEndStr = batchEnd.toISOString().split('T')[0];
+
+          // Insert daily snapshots for this batch using window functions
+          // This reconstructs historical state from item creation dates
+          // Only includes items with valid file_size to ensure total_size > 0
+          const result = await db.execute(sql`
+            INSERT INTO library_snapshots (
+              server_id, library_id, snapshot_time,
+              item_count, total_size,
+              movie_count, episode_count, season_count, show_count, music_count,
+              count_4k, count_1080p, count_720p, count_sd,
+              hevc_count, h264_count, av1_count,
+              enrichment_pending, enrichment_complete
+            )
+            WITH all_daily_additions AS (
+              -- Get per-day additions with all metrics (up to batch end for accurate cumulative)
+              -- Only count items with valid file_size to ensure snapshots won't be cleaned up
+              SELECT
+                DATE(created_at) AS day,
+                COUNT(*) AS items,
+                SUM(file_size) AS size,
+                COUNT(*) FILTER (WHERE media_type = 'movie') AS movies,
+                COUNT(*) FILTER (WHERE media_type = 'episode') AS episodes,
+                COUNT(*) FILTER (WHERE media_type = 'season') AS seasons,
+                COUNT(*) FILTER (WHERE media_type = 'show') AS shows,
+                COUNT(*) FILTER (WHERE media_type IN ('artist', 'album', 'track')) AS music,
+                COUNT(*) FILTER (WHERE video_resolution = '4k') AS c4k,
+                COUNT(*) FILTER (WHERE video_resolution = '1080p') AS c1080p,
+                COUNT(*) FILTER (WHERE video_resolution = '720p') AS c720p,
+                COUNT(*) FILTER (WHERE video_resolution IN ('480p', 'sd')
+                                  OR (video_resolution IS NOT NULL
+                                      AND video_resolution NOT IN ('4k', '1080p', '720p'))) AS csd,
+                COUNT(*) FILTER (WHERE video_codec IN ('hevc', 'h265', 'x265', 'HEVC', 'H265', 'X265')) AS hevc,
+                COUNT(*) FILTER (WHERE video_codec IN ('h264', 'avc', 'x264', 'H264', 'AVC', 'X264')) AS h264,
+                COUNT(*) FILTER (WHERE video_codec IN ('av1', 'AV1')) AS av1
+              FROM library_items
+              WHERE server_id = ${lib.server_id}::uuid
+                AND library_id = ${lib.library_id}
+                AND ${VALID_LIBRARY_ITEM_CONDITION}
+                AND DATE(created_at) <= ${batchEndStr}::date
+              GROUP BY DATE(created_at)
+            ),
+            date_series AS (
+              SELECT d::date AS day FROM generate_series(
+                ${batchStartStr}::date, ${batchEndStr}::date, '1 day'
+              ) d
+            ),
+            all_dates AS (
+              -- All dates from library start to batch end for cumulative calculation
+              SELECT d::date AS day FROM generate_series(
+                ${lib.start_date}::date, ${batchEndStr}::date, '1 day'
+              ) d
+            ),
+            filled AS (
+              SELECT ad.day,
+                COALESCE(da.items, 0) AS items, COALESCE(da.size, 0) AS size,
+                COALESCE(da.movies, 0) AS movies, COALESCE(da.episodes, 0) AS episodes,
+                COALESCE(da.seasons, 0) AS seasons, COALESCE(da.shows, 0) AS shows,
+                COALESCE(da.music, 0) AS music,
+                COALESCE(da.c4k, 0) AS c4k, COALESCE(da.c1080p, 0) AS c1080p,
+                COALESCE(da.c720p, 0) AS c720p, COALESCE(da.csd, 0) AS csd,
+                COALESCE(da.hevc, 0) AS hevc, COALESCE(da.h264, 0) AS h264,
+                COALESCE(da.av1, 0) AS av1
+              FROM all_dates ad
+              LEFT JOIN all_daily_additions da ON da.day = ad.day
+            ),
+            cumulative AS (
+              SELECT
+                f.day,
+                -- Cumulative counts using window functions
+                SUM(items) OVER w AS item_count,
+                SUM(size) OVER w AS total_size,
+                SUM(movies) OVER w AS movie_count,
+                SUM(episodes) OVER w AS episode_count,
+                SUM(seasons) OVER w AS season_count,
+                SUM(shows) OVER w AS show_count,
+                SUM(music) OVER w AS music_count,
+                SUM(c4k) OVER w AS count_4k,
+                SUM(c1080p) OVER w AS count_1080p,
+                SUM(c720p) OVER w AS count_720p,
+                SUM(csd) OVER w AS count_sd,
+                SUM(hevc) OVER w AS hevc_count,
+                SUM(h264) OVER w AS h264_count,
+                SUM(av1) OVER w AS av1_count
+              FROM filled f
+              WINDOW w AS (ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+            )
+            SELECT
+              ${lib.server_id}::uuid,
+              ${lib.library_id},
+              (c.day + INTERVAL '23 hours 59 minutes 59 seconds')::timestamptz,
+              c.item_count::int,
+              c.total_size::bigint,
+              c.movie_count::int,
+              c.episode_count::int,
+              c.season_count::int,
+              c.show_count::int,
+              c.music_count::int,
+              c.count_4k::int,
+              c.count_1080p::int,
+              c.count_720p::int,
+              c.count_sd::int,
+              c.hevc_count::int,
+              c.h264_count::int,
+              c.av1_count::int,
+              0,  -- enrichment_pending: all historical items already enriched
+              c.item_count::int  -- enrichment_complete
+            FROM cumulative c
+            -- Only insert for days in this batch's date_series
+            WHERE c.day IN (SELECT day FROM date_series)
+            -- Only insert if there's actual content (prevents empty leading snapshots)
+            AND c.item_count > 0
+            AND c.total_size > 0
+            -- Skip days that already have snapshots (idempotent)
+            AND NOT EXISTS (
+              SELECT 1 FROM library_snapshots ls
+              WHERE ls.server_id = ${lib.server_id}::uuid
+                AND ls.library_id = ${lib.library_id}
+                AND DATE(ls.snapshot_time) = c.day
+            )
+          `);
+
+          librarySnapshotsCreated += Number(result.rowCount ?? 0);
+
+          // Move to next batch
+          batchStart = new Date(batchEnd);
+          batchStart.setDate(batchStart.getDate() + 1);
+        }
+
+        totalSnapshotsCreated += librarySnapshotsCreated;
         totalProcessed++;
 
         activeJobProgress.processedRecords = totalProcessed;
@@ -1507,20 +1558,42 @@ async function processBackfillLibrarySnapshotsJob(
       }
     }
 
-    // Clean up empty snapshots (from bad dates like 1969/1970 or gaps before real data)
-    // Note: We only delete snapshots with no items in any category.
-    // Snapshots with items but total_size=0 are kept (items may lack file_size metadata).
-    // See snapshotValidation.ts for the centralized definition of invalid snapshots.
-    activeJobProgress.message = 'Cleaning up empty snapshots...';
+    // Clean up invalid snapshots in batches to avoid lock exhaustion
+    // See snapshotValidation.ts for the definition: snapshots need both items AND size
+    // Note: With the VALID_LIBRARY_ITEM_CONDITION filter, this should rarely find anything
+    activeJobProgress.message = 'Cleaning up invalid snapshots...';
     await publishProgress();
 
-    const cleanupResult = await db.execute(sql`
-      DELETE FROM library_snapshots
-      WHERE ${INVALID_SNAPSHOT_CONDITION}
-    `);
-    const cleanedUp = Number(cleanupResult.rowCount ?? 0);
-    if (cleanedUp > 0) {
-      console.log(`[Maintenance] Cleaned up ${cleanedUp} empty snapshots`);
+    let totalCleanedUp = 0;
+    const CLEANUP_BATCH_SIZE = 1000;
+
+    try {
+      let cleanupBatchCount: number;
+      do {
+        const cleanupResult = await db.execute(sql`
+          DELETE FROM library_snapshots
+          WHERE id IN (
+            SELECT id FROM library_snapshots
+            WHERE ${INVALID_SNAPSHOT_CONDITION}
+            LIMIT ${CLEANUP_BATCH_SIZE}
+          )
+        `);
+        cleanupBatchCount = Number(cleanupResult.rowCount ?? 0);
+        totalCleanedUp += cleanupBatchCount;
+
+        if (cleanupBatchCount > 0) {
+          activeJobProgress.skippedRecords = totalCleanedUp;
+          await publishProgress();
+        }
+      } while (cleanupBatchCount === CLEANUP_BATCH_SIZE);
+
+      if (totalCleanedUp > 0) {
+        console.log(`[Maintenance] Cleaned up ${totalCleanedUp} invalid snapshots`);
+      }
+    } catch (error) {
+      // Don't fail the entire job if cleanup fails - the backfill succeeded
+      // and cleanup can be retried on the next run
+      console.error('[Maintenance] Error during snapshot cleanup:', error);
     }
 
     // Refresh the continuous aggregate to include backfilled data
@@ -1542,8 +1615,8 @@ async function processBackfillLibrarySnapshotsJob(
     const durationMs = Date.now() - startTime;
     activeJobProgress.status = 'complete';
     activeJobProgress.processedRecords = totalProcessed;
-    activeJobProgress.skippedRecords = cleanedUp;
-    activeJobProgress.message = `Completed! Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${cleanedUp > 0 ? `, cleaned up ${cleanedUp} empty` : ''} in ${Math.round(durationMs / 1000)}s`;
+    activeJobProgress.skippedRecords = totalCleanedUp;
+    activeJobProgress.message = `Completed! Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${totalCleanedUp > 0 ? `, cleaned up ${totalCleanedUp} invalid` : ''} in ${Math.round(durationMs / 1000)}s`;
     activeJobProgress.completedAt = new Date().toISOString();
     await publishProgress();
 
@@ -1554,10 +1627,10 @@ async function processBackfillLibrarySnapshotsJob(
       type: 'backfill_library_snapshots',
       processed: totalProcessed,
       updated: totalSnapshotsCreated,
-      skipped: cleanedUp,
+      skipped: totalCleanedUp,
       errors: totalErrors,
       durationMs,
-      message: `Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${cleanedUp > 0 ? `, cleaned up ${cleanedUp} empty` : ''}`,
+      message: `Created ${totalSnapshotsCreated.toLocaleString()} snapshots for ${totalProcessed} libraries${totalCleanedUp > 0 ? `, cleaned up ${totalCleanedUp} invalid` : ''}`,
     };
   } catch (error) {
     if (activeJobProgress) {
