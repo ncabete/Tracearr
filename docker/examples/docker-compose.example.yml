@@ -57,7 +57,7 @@ services:
     shm_size: 512mb  # Required for PostgreSQL shared memory (increase for large imports)
     # Allow unlimited tuple decompression for migrations on compressed hypertables
     # Increase lock table size for large imports (Tautulli imports with many TimescaleDB chunks)
-    command: postgres -c timescaledb.max_tuples_decompressed_per_dml_transaction=0 -c max_locks_per_transaction=1024
+    command: postgres -c timescaledb.max_tuples_decompressed_per_dml_transaction=0 -c max_locks_per_transaction=4096
     environment:
       - POSTGRES_USER=tracearr
       - POSTGRES_PASSWORD=${DB_PASSWORD:-tracearr}

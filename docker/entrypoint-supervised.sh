@@ -304,15 +304,15 @@ fi
 # Without it, bulk UPDATEs on compressed sessions will fail with
 # "tuple decompression limit exceeded" errors. Must be 0 (unlimited).
 if [ -f /data/postgres/postgresql.conf ]; then
-    if grep -q "^timescaledb.max_tuples_decompressed_per_dml_transaction" /data/postgres/postgresql.conf; then
-        # Setting exists - ensure it's set to 0
-        current_value=$(grep "^timescaledb.max_tuples_decompressed_per_dml_transaction" /data/postgres/postgresql.conf | grep -oE '[0-9]+' | head -1)
-        if [ "$current_value" != "0" ] 2>/dev/null; then
+    if grep -q "^timescaledb\.max_tuples_decompressed_per_dml_transaction" /data/postgres/postgresql.conf; then
+        # Setting exists (uncommented) - ensure it's set to 0
+        current_value=$(grep "^timescaledb\.max_tuples_decompressed_per_dml_transaction" /data/postgres/postgresql.conf | grep -oE '[0-9]+' | head -1)
+        if [ -n "$current_value" ] && [ "$current_value" != "0" ]; then
             log "Updating timescaledb.max_tuples_decompressed_per_dml_transaction to 0..."
-            sed -i "s/^timescaledb.max_tuples_decompressed_per_dml_transaction.*/timescaledb.max_tuples_decompressed_per_dml_transaction = 0/" /data/postgres/postgresql.conf
+            sed -i "s/^timescaledb\.max_tuples_decompressed_per_dml_transaction.*/timescaledb.max_tuples_decompressed_per_dml_transaction = 0/" /data/postgres/postgresql.conf
         fi
-    elif ! grep -q "max_tuples_decompressed_per_dml_transaction" /data/postgres/postgresql.conf; then
-        # Setting doesn't exist at all - add it
+    elif ! grep -q "^timescaledb\.max_tuples_decompressed_per_dml_transaction" /data/postgres/postgresql.conf; then
+        # Setting doesn't exist or is commented out - add active setting
         log "Adding TimescaleDB decompression setting for migrations..."
         echo "" >> /data/postgres/postgresql.conf
         echo "# Allow unlimited tuple decompression for migrations on compressed hypertables" >> /data/postgres/postgresql.conf
@@ -329,14 +329,14 @@ fi
 # Memory cost: 4096 * max_connections * ~256 bytes = ~100MB at 100 connections (trivial)
 if [ -f /data/postgres/postgresql.conf ]; then
     if grep -q "^max_locks_per_transaction" /data/postgres/postgresql.conf; then
-        # Setting exists - update if below 4096
+        # Setting exists (uncommented) - update if below 4096
         current_value=$(grep "^max_locks_per_transaction" /data/postgres/postgresql.conf | grep -oE '[0-9]+' | head -1)
-        if [ "$current_value" -lt 4096 ] 2>/dev/null; then
+        if [ -n "$current_value" ] && [ "$current_value" -lt 4096 ]; then
             log "Updating max_locks_per_transaction from $current_value to 4096..."
             sed -i "s/^max_locks_per_transaction.*/max_locks_per_transaction = 4096/" /data/postgres/postgresql.conf
         fi
-    elif ! grep -q "max_locks_per_transaction" /data/postgres/postgresql.conf; then
-        # Setting doesn't exist at all - add it
+    elif ! grep -q "^max_locks_per_transaction" /data/postgres/postgresql.conf; then
+        # Setting doesn't exist or is commented out - add active setting
         log "Adding max_locks_per_transaction setting for TimescaleDB..."
         echo "" >> /data/postgres/postgresql.conf
         echo "# Increase lock table size for TimescaleDB hypertables with many chunks" >> /data/postgres/postgresql.conf
