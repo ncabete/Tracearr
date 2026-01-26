@@ -1673,11 +1673,18 @@ async function enableLibrarySnapshotsCompression(): Promise<void> {
 /**
  * Add retention policy to library_snapshots hypertable
  *
- * Drops chunks older than 1 year automatically.
+ * Drops chunks older than 90 days automatically. Aggregates (library_stats_daily)
+ * preserve summarized history indefinitely, so raw data only needs short retention.
+ * Matches manual cleanup_old_chunks job retention period.
  */
 async function addLibrarySnapshotsRetention(): Promise<void> {
-  // 90 days retention for raw snapshots - aggregates (library_stats_daily) preserve
-  // summarized history indefinitely. Matches manual cleanup_old_chunks job.
+  // Remove any existing policy first to ensure we update to 90 days
+  // (add_retention_policy with if_not_exists won't change existing policies)
+  try {
+    await db.execute(sql`SELECT remove_retention_policy('library_snapshots', if_exists => true)`);
+  } catch {
+    // Ignore errors - policy may not exist
+  }
   await db.execute(sql`
     SELECT add_retention_policy('library_snapshots', INTERVAL '90 days', if_not_exists => true)
   `);
